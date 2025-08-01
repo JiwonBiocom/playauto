@@ -4,6 +4,10 @@ from psycopg2.extras import RealDictCursor
 import streamlit as st
 from contextlib import contextmanager
 from typing import Dict, List, Any, Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class DatabaseConnection:
     """PostgreSQL database connection manager"""
