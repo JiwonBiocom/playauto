@@ -44,7 +44,8 @@ def create_table(conn):
         현재재고 INTEGER, 
         리드타임 INTEGER, 
         최소주문수량 INTEGER, 
-        안전재고 INTEGER
+        안전재고 INTEGER, 
+        제조사 VARCHAR(10), 
     );
     """
     

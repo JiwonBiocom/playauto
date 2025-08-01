@@ -204,8 +204,7 @@ def calculate_prediction_accuracy(actual: List[float], predicted: List[float]) -
     
     return metrics
 
-def get_inventory_status(current_stock: int, safety_stock: int, 
-                        days_until_reorder: int) -> Tuple[str, str]:
+def get_inventory_status(current_stock: int, safety_stock: int, days_until_reorder: int) -> Tuple[str, str]:
     """
     Determine inventory status and urgency level
     

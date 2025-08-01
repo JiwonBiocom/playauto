@@ -52,11 +52,10 @@ DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # Categories
 PRODUCT_CATEGORIES = [
-    '비타민',
-    '오메가3',
-    '프로바이오틱스',
-    '건강식품',
-    '기타'
+    '영양제',
+    '도시락',
+    '커피',
+    '검사권',
 ]
 
 # Suppliers
