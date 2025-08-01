@@ -40,6 +40,8 @@ class DatabaseConnection:
             cursor_factory = RealDictCursor if dict_cursor else None
             cursor = conn.cursor(cursor_factory=cursor_factory)
             try:
+                # Set timezone to Korean time for this session
+                cursor.execute("SET timezone = 'Asia/Seoul'")
                 yield cursor
                 conn.commit()
             except Exception as e:
@@ -69,6 +71,76 @@ class DatabaseConnection:
 # Singleton instance
 db = DatabaseConnection()
 
+# Member-related queries
+class MemberQueries:
+    @staticmethod
+    def get_all_members():
+        query = """
+        SELECT 
+            id, name, master, email, phone_no 
+        FROM playauto_members
+        ORDER BY last_update_time
+        """
+        return db.execute_query(query)
+    
+    @staticmethod
+    def insert_member(id: str, password: str, name: str, master: str, email: str, phone_no: str):
+        query = """
+        INSERT INTO playauto_members 
+        (id, password, name, master, email, phone_no) 
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (id, password, name, master, email, phone_no))
+    
+    @staticmethod
+    def verify_login(id: str, password: str):
+        query = """
+        SELECT id, name, master, email, phone_no 
+        FROM playauto_members 
+        WHERE id = %s AND password = %s
+        """
+        results = db.execute_query(query, (id, password))
+        return results[0] if results else None
+    
+    @staticmethod
+    def get_member_by_id(id: str):
+        query = """
+        SELECT id, name, master, email, phone_no 
+        FROM playauto_members 
+        WHERE id = %s
+        """
+        results = db.execute_query(query, (id,))
+        return results[0] if results else None
+    
+    @staticmethod
+    def update_member_info(id: str, email: str, phone_no: str):
+        query = """
+        UPDATE playauto_members 
+        SET email = %s, phone_no = %s, last_update_time = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """
+        return db.execute_update(query, (email, phone_no, id))
+    
+    @staticmethod
+    def update_member_password(id: str, old_password: str, new_password: str):
+        # First verify old password
+        query_verify = """
+        SELECT id FROM playauto_members 
+        WHERE id = %s AND password = %s
+        """
+        results = db.execute_query(query_verify, (id, old_password))
+        if not results:
+            return False
+        
+        # Update password
+        query_update = """
+        UPDATE playauto_members 
+        SET password = %s, last_update_time = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """
+        return db.execute_update(query_update, (new_password, id))
+
+
 # Product-related queries
 class ProductQueries:
     @staticmethod
@@ -78,9 +150,10 @@ class ProductQueries:
             마스터_sku, 플레이오토_sku,
             상품명, 카테고리, 세트유무,
             출고량, 입고량, 현재재고, 
-            리드타임, 최소주문수량, 안전재고
+            리드타임, 최소주문수량, 안전재고, 
+            제조사, 소비기한
         FROM playauto_product_inventory
-        ORDER BY 마스터_sku
+        ORDER BY 플레이오토_sku
         """
         return db.execute_query(query)
     
@@ -89,7 +162,7 @@ class ProductQueries:
         query = """
         SELECT * FROM playauto_product_inventory 
         WHERE 카테고리 = %s
-        ORDER BY 마스터_sku
+        ORDER BY 플레이오토_sku
         """
         return db.execute_query(query, (category,))
     
@@ -112,8 +185,28 @@ class ProductQueries:
         return results[0] if results else None
     
     @staticmethod
+    def get_latest_playauto_sku():
+        query = """
+        SELECT MAX(플레이오토_sku) as max_sku
+        FROM playauto_product_inventory
+        """
+        result = db.execute_query(query)
+        if result and len(result) > 0 and result[0]['max_sku']:
+            return result[0]['max_sku']
+        return None
+    
+    @staticmethod
+    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration):
+        query = """
+        INSERT INTO playauto_product_inventory 
+        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, lead_time, moq, safety_stock, supplier, expiration))
+    
+    @staticmethod
     def update_product(master_sku: str, **kwargs):
-        allowed_fields = ['리드타임', '최소주문수량', '안전재고', '현재재고', '출고량', '입고량']
+        allowed_fields = ['리드타임', '최소주문수량', '안전재고', '현재재고', '출고량', '입고량', '소비기한']
         update_fields = []
         params = []
         
@@ -134,7 +227,7 @@ class ProductQueries:
         return db.execute_update(query, tuple(params))
     
     @staticmethod
-    def process_inventory_in(master_sku: str, quantity: int):
+    def process_inventory_in(master_sku: str, quantity: int):  # 제고 테이블 입고량 업데이트
         """Process incoming inventory (increase stock)"""
         query = """
         UPDATE playauto_product_inventory 
@@ -145,7 +238,7 @@ class ProductQueries:
         return db.execute_update(query, (quantity, quantity, master_sku))
     
     @staticmethod
-    def process_inventory_out(master_sku: str, quantity: int):
+    def process_inventory_out(master_sku: str, quantity: int):  # 제고 테이블 출고량 업데이트
         """Process outgoing inventory (decrease stock)"""
         query = """
         UPDATE playauto_product_inventory 
@@ -156,7 +249,7 @@ class ProductQueries:
         return db.execute_update(query, (quantity, quantity, master_sku, quantity))
     
     @staticmethod
-    def adjust_inventory(master_sku: str, new_stock_level: int):
+    def adjust_inventory(master_sku: str, new_stock_level: int):  # 현재 재고 업데이트
         """Directly adjust inventory to a specific level"""
         query = """
         UPDATE playauto_product_inventory 
@@ -164,6 +257,94 @@ class ProductQueries:
         WHERE 마스터_sku = %s
         """
         return db.execute_update(query, (new_stock_level, master_sku))
+    
+    @staticmethod
+    def adjust_history(master_sku: str, current_stock: int, new_stock_level: int, reason: str, name: str, id: str):
+        """Original and updated inventory and the reason for it"""
+        query = """
+        INSERT INTO playauto_inventory_adjust 
+        (마스터_sku, 현재재고, 실제재고, 사유, 작업자명, 작업자_id) 
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (master_sku, current_stock, new_stock_level, reason, name, id))
+
+# 입출고 테이블
+class ShipmentQueries:
+    @staticmethod
+    def get_all_shipment_receipts():
+        """Get all shipment receipts ordered by time"""
+        query = """SELECT * FROM playauto_shipment_receipt ORDER BY 시점 DESC"""
+        return db.execute_query(query)
+    
+    @staticmethod
+    def get_monthly_shipment_summary():
+        """Get shipment data aggregated by month for the last 6 months"""
+        query = """
+        WITH monthly_data AS (
+            SELECT 
+                p.마스터_sku,
+                p.상품명,
+                EXTRACT(YEAR FROM sr.시점) as year,
+                EXTRACT(MONTH FROM sr.시점) as month,
+                SUM(CASE WHEN sr.입출고_여부 = '출고' THEN sr.수량 ELSE 0 END) as 월별출고량
+            FROM playauto_product_inventory p
+            LEFT JOIN playauto_shipment_receipt sr ON p.마스터_sku = sr.마스터_SKU
+            WHERE sr.시점 >= CURRENT_DATE - INTERVAL '6 months'
+                AND sr.입출고_여부 = '출고'
+            GROUP BY p.마스터_sku, p.상품명, 
+                     EXTRACT(YEAR FROM sr.시점), EXTRACT(MONTH FROM sr.시점)
+        )
+        SELECT 
+            마스터_sku,
+            상품명,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '6 months' <= make_date(year::int, month::int, 1) 
+                     AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '5 months' 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_2월,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '5 months' <= make_date(year::int, month::int, 1) 
+                     AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '4 months' 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_3월,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '4 months' <= make_date(year::int, month::int, 1) 
+                     AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '3 months' 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_4월,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '3 months' <= make_date(year::int, month::int, 1) 
+                     AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '2 months' 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_5월,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '2 months' <= make_date(year::int, month::int, 1) 
+                     AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '1 month' 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_6월,
+            SUM(CASE WHEN CURRENT_DATE - INTERVAL '1 month' <= make_date(year::int, month::int, 1) 
+                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_7월
+        FROM monthly_data
+        GROUP BY 마스터_sku, 상품명
+        ORDER BY 마스터_sku
+        """
+        return db.execute_query(query)
+    
+    @staticmethod
+    def insert_shipment_receipt(master_sku: str, transaction_type: str, quantity: int, name: str, id: str):
+        """Insert a new shipment receipt with Korean timezone"""
+        query = """
+        INSERT INTO playauto_shipment_receipt 
+        (마스터_SKU, 입출고_여부, 수량, 시점, 작업자명, 작업자_id)
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul', %s, %s)
+        """
+        return db.execute_update(query, (master_sku, transaction_type, quantity, name, id))
+    
+    @staticmethod
+    def get_total_monthly_shipments():
+        """Get total shipment amounts by month for the last 6 months"""
+        query = """
+        SELECT 
+            TO_CHAR(시점, 'YYYY-MM') as month,
+            SUM(수량) as total_shipment
+        FROM playauto_shipment_receipt
+        WHERE 입출고_여부 = '출고'
+            AND 시점 >= CURRENT_DATE - INTERVAL '6 months'
+        GROUP BY TO_CHAR(시점, 'YYYY-MM')
+        ORDER BY month
+        """
+        return db.execute_query(query)
+
 
 # Inventory transaction queries
 class InventoryQueries:
@@ -255,3 +436,45 @@ class PredictionQueries:
             query += " AND p.product_id = %s"
             return db.execute_query(query, (product_id,))
         return db.execute_query(query)
+    
+    @staticmethod
+    def save_manual_adjustment(master_sku: str, pred_1month: float, pred_2month: float, pred_3month: float,
+                               adjusted_1month: float, adjusted_2month: float, adjusted_3month: float,
+                               reason: str, edited_by: str):
+        """Save manual prediction adjustment to playauto_predictions table"""
+        query = """
+        INSERT INTO playauto_predictions 
+        (마스터_sku, pred_1month, pred_2month, pred_3month, 
+         adjusted_1month, adjusted_2month, adjusted_3month, 
+         reason, edited_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING 예측결과_id
+        """
+        return db.execute_query(query, (master_sku, pred_1month, pred_2month, pred_3month,
+                                        adjusted_1month, adjusted_2month, adjusted_3month,
+                                        reason, edited_by))
+    
+    @staticmethod
+    def get_latest_adjustment(master_sku: str):
+        """Get the most recent manual adjustment for a product"""
+        query = """
+        SELECT * FROM playauto_predictions 
+        WHERE 마스터_sku = %s 
+        ORDER BY edited_at DESC 
+        LIMIT 1
+        """
+        results = db.execute_query(query, (master_sku,))
+        return results[0] if results else None
+    
+    @staticmethod
+    def get_adjusted_prediction(master_sku: str):
+        query = """
+        SELECT DISTINCT ON (마스터_sku)
+            adjusted_1month,
+            adjusted_2month,
+            adjusted_3month
+        FROM playauto_predictions
+        WHERE adjusted_1month IS NOT NULL AND 마스터_sku = %s
+        ORDER BY 마스터_sku, edited_at DESC
+        """
+        return db.execute_query(query, (master_sku,))
