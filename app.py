@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import os
 from dotenv import load_dotenv
 import io
 import pickle
 import numpy as np
 import plotly.graph_objects as go
+
 import time
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 # Import database connection and queries
 from config.database import db, MemberQueries, ProductQueries, ShipmentQueries, PredictionQueries
@@ -193,7 +195,7 @@ def show_dashboard():
     st.title("📊 실시간 재고 현황 대시보드")
     
     # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     # Get metrics from database
     try:
@@ -234,13 +236,13 @@ def show_dashboard():
         st.metric("재고 부족 제품", f"{low_stock}개", f"+{critical_stock}", delta_color="inverse")
     with col3:
         st.metric("7일 내 발주 필요", f"{need_order_soon}개", "+0", delta_color="inverse")
-    with col4:
-        st.metric("예측 정확도", "92% (임시)", "+3% (임시)")
+    # with col4:
+    #     st.metric("예측 정확도", "92% (임시)", "+3% (임시)")
     
     st.markdown("---")
     
-    # Inventory status table
-    st.subheader("재고 현황")
+    # 상품별 재고 현황
+    st.subheader("상품별 재고 현황")
     
     # Load data from PostgreSQL
     try:
@@ -317,100 +319,157 @@ def show_dashboard():
         hide_index=True
     )
     
-    # Charts
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("월별 출고량 추이")
-        
-        # Get actual monthly shipment data from database
-        try:
-            monthly_shipments = ShipmentQueries.get_total_monthly_shipments()
+    # 바 그래프
+    try:
+        all_products = ProductQueries.get_all_products()
+        if all_products:
+            df_products = pd.DataFrame(all_products)
             
-            if monthly_shipments:
-                # Convert to DataFrame
-                df_monthly = pd.DataFrame(monthly_shipments)
+            # Calculate status for each product
+            colors = []
+            product_names = []
+            inventory_values = []
+            
+            for _, product in df_products.iterrows():
+                product_names.append(product['상품명'])
+                inventory_values.append(product['현재재고'])
                 
-                # Create a date range for the last 6 months
-                # Set end date to July 2025 (last historical month)
-                end_date = pd.Timestamp(2025, 7, 31)
-                start_date = end_date - pd.DateOffset(months=6) + pd.DateOffset(days=1)  # 6 months total including July
-                date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-                
-                # Create a complete dataframe with all months
-                all_months = pd.DataFrame({
-                    'month': [d.strftime('%Y-%m') for d in date_range],
-                    'total_shipment': 0
-                })
-                
-                # Merge with actual data
-                if not df_monthly.empty:
-                    all_months = all_months.merge(df_monthly, on='month', how='left', suffixes=('', '_actual'))
-                    all_months['total_shipment'] = all_months['total_shipment_actual'].fillna(0).astype(int)
-                    all_months = all_months[['month', 'total_shipment']]
-                
-                # Create month labels
-                month_labels = []
-                for month_str in all_months['month']:
-                    year, month = month_str.split('-')
-                    month_labels.append(f"{year[2:]}년 {int(month)}월")
-                
-                # Create chart dataframe
-                chart_df = pd.DataFrame({
-                    '출고량': all_months['total_shipment'].tolist()
-                }, index=month_labels)
-                
-                # Display line chart
-                st.line_chart(chart_df)
-            else:
-                # No data - show empty chart with message
-                st.info("출고 데이터가 없습니다. 입출고 데이터를 먼저 등록해주세요.")
-                # Show temporary data as fallback
-                df_shipment = pd.DataFrame({
-                    '출고량': [0, 0, 0, 0, 0, 0]
-                }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
-                st.line_chart(df_shipment)
-                
-        except Exception as e:
-            st.error(f"데이터 로드 오류: {str(e)}")
-            # Fallback to sample data
-            df_shipment = pd.DataFrame({
-                '출고량': [3000, 3200, 2800, 3500, 3300, 3600]
-            }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
-            st.line_chart(df_shipment)
-    
-    with col2:
-        st.subheader("카테고리별 재고 현황")
-        
-        # Get category inventory data from database
-        try:
-            all_products = ProductQueries.get_all_products()
-            if all_products:
-                df_products = pd.DataFrame(all_products)
-                
-                # Group by category and sum the current inventory
-                category_inventory = df_products.groupby('카테고리')['현재재고'].sum().to_dict()
-                
-                # Create dataframe for chart
-                if category_inventory:
-                    inventory_df = pd.DataFrame({
-                        '재고량': list(category_inventory.values())
-                    }, index=list(category_inventory.keys()))
-                    
-                    st.bar_chart(inventory_df)
+                # Determine color based on stock status
+                if product['현재재고'] < product['안전재고'] * 0.5:
+                    colors.append('#ff4444')  # Red for emergency
+                elif product['현재재고'] < product['안전재고']:
+                    colors.append('#ff9944')  # Orange for warning
                 else:
-                    # Fallback if no data
-                    st.info("카테고리별 재고 데이터가 없습니다.")
+                    colors.append('#4444ff')  # Blue for normal
+            
+            # Create Plotly bar chart
+            if product_names:
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=product_names,
+                        y=inventory_values,
+                        marker_color=colors,
+                        text=inventory_values,
+                        textposition='auto'
+                    )
+                ])
+                
+                fig.update_layout(
+                    xaxis_title="제품명",
+                    yaxis_title="재고량",
+                    showlegend=False,
+                    height=400
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                # Fallback to sample data if no products
-                st.bar_chart(pd.DataFrame({
-                    '재고량': [0]
-                }, index=['데이터 없음']))
-        except Exception as e:
-            st.error(f"데이터 로드 오류: {str(e)}")
-            # Fallback to sample data on error
+                st.info("제품별 재고 데이터가 없습니다.")
+        else:
+            # Fallback to sample data if no products
             st.bar_chart(pd.DataFrame({
                 '재고량': [0]
-            }, index=['오류']))
+            }, index=['데이터 없음']))
+    except Exception as e:
+        st.error(f"데이터 로드 오류: {str(e)}")
+        # Fallback to sample data on error
+        st.bar_chart(pd.DataFrame({
+            '재고량': [0]
+        }, index=['오류']))
+    
+    # # Charts
+    # col1, col2 = st.columns(2)
+    # with col1:
+    #     st.subheader("월별 출고량 추이")
+        
+    #     # Get actual monthly shipment data from database
+    #     try:
+    #         monthly_shipments = ShipmentQueries.get_total_monthly_shipments()
+            
+    #         if monthly_shipments:
+    #             # Convert to DataFrame
+    #             df_monthly = pd.DataFrame(monthly_shipments)
+                
+    #             # Create a date range for the last 6 months
+    #             # Set end date to July 2025 (last historical month)
+    #             end_date = pd.Timestamp(2025, 7, 31)
+    #             start_date = end_date - pd.DateOffset(months=6) + pd.DateOffset(days=1)  # 6 months total including July
+    #             date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
+                
+    #             # Create a complete dataframe with all months
+    #             all_months = pd.DataFrame({
+    #                 'month': [d.strftime('%Y-%m') for d in date_range],
+    #                 'total_shipment': 0
+    #             })
+                
+    #             # Merge with actual data
+    #             if not df_monthly.empty:
+    #                 all_months = all_months.merge(df_monthly, on='month', how='left', suffixes=('', '_actual'))
+    #                 all_months['total_shipment'] = all_months['total_shipment_actual'].fillna(0).astype(int)
+    #                 all_months = all_months[['month', 'total_shipment']]
+                
+    #             # Create month labels
+    #             month_labels = []
+    #             for month_str in all_months['month']:
+    #                 year, month = month_str.split('-')
+    #                 month_labels.append(f"{year[2:]}년 {int(month)}월")
+                
+    #             # Create chart dataframe
+    #             chart_df = pd.DataFrame({
+    #                 '출고량': all_months['total_shipment'].tolist()
+    #             }, index=month_labels)
+                
+    #             # Display line chart
+    #             st.line_chart(chart_df)
+    #         else:
+    #             # No data - show empty chart with message
+    #             st.info("출고 데이터가 없습니다. 입출고 데이터를 먼저 등록해주세요.")
+    #             # Show temporary data as fallback
+    #             df_shipment = pd.DataFrame({
+    #                 '출고량': [0, 0, 0, 0, 0, 0]
+    #             }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
+    #             st.line_chart(df_shipment)
+                
+    #     except Exception as e:
+    #         st.error(f"데이터 로드 오류: {str(e)}")
+    #         # Fallback to sample data
+    #         df_shipment = pd.DataFrame({
+    #             '출고량': [3000, 3200, 2800, 3500, 3300, 3600]
+    #         }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
+    #         st.line_chart(df_shipment)
+    
+    # with col2:
+    #     st.subheader("카테고리별 재고 현황")
+        
+    #     # Get category inventory data from database
+    #     try:
+    #         all_products = ProductQueries.get_all_products()
+    #         if all_products:
+    #             df_products = pd.DataFrame(all_products)
+                
+    #             # Group by category and sum the current inventory
+    #             category_inventory = df_products.groupby('카테고리')['현재재고'].sum().to_dict()
+                
+    #             # Create dataframe for chart
+    #             if category_inventory:
+    #                 inventory_df = pd.DataFrame({
+    #                     '재고량': list(category_inventory.values())
+    #                 }, index=list(category_inventory.keys()))
+                    
+    #                 st.bar_chart(inventory_df)
+    #             else:
+    #                 # Fallback if no data
+    #                 st.info("카테고리별 재고 데이터가 없습니다.")
+    #         else:
+    #             # Fallback to sample data if no products
+    #             st.bar_chart(pd.DataFrame({
+    #                 '재고량': [0]
+    #             }, index=['데이터 없음']))
+    #     except Exception as e:
+    #         st.error(f"데이터 로드 오류: {str(e)}")
+    #         # Fallback to sample data on error
+    #         st.bar_chart(pd.DataFrame({
+    #             '재고량': [0]
+    #         }, index=['오류']))
 
 # 출고량 확인
 def show_shipment_quantity():
@@ -433,17 +492,21 @@ def show_shipment_quantity():
                 # Reorder columns for display
                 display_columns = [
                     '마스터_sku', '상품명',
-                    '출고량_25년_2월', '출고량_25년_3월', '출고량_25년_4월',
-                    '출고량_25년_5월', '출고량_25년_6월', '출고량_25년_7월'
+                    '출고량_5개월전', '출고량_4개월전', '출고량_3개월전', 
+                    '출고량_2개월전', '출고량_1개월전', '출고량_현재월'
                 ]
                 df_display = df_shipment[display_columns]
                 
+                # Generate dynamic month names based on current date
+                current_date = datetime.now()
+                month_names = []
+                for i in range(5, -1, -1):  # 6 months ago to 1 month ago
+                    target_date = current_date - relativedelta(months=i)
+                    month_name = f"{str(target_date.year)[2:]}년_{target_date.month}월"
+                    month_names.append(month_name)
+                
                 # Rename columns for better display
-                df_display.columns = [
-                    '마스터 SKU', '상품명',
-                    '25년_2월', '25년_3월', '25년_4월',
-                    '25년_5월', '25년_6월', '25년_7월'
-                ]
+                df_display.columns = ['마스터 SKU', '상품명'] + month_names
                 
                 # Display the dataframe
                 st.dataframe(
@@ -467,7 +530,7 @@ def show_shipment_quantity():
                     selected_row = df_display[df_display['상품명'] == selected_product].iloc[0]
                     
                     # Prepare data for line chart
-                    months = ['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월']
+                    months = month_names  # Use the dynamically generated month names
                     values = []
                     
                     # Extract values for each month
@@ -785,7 +848,7 @@ def show_product_management():
                 safety_stock = st.number_input("안전재고", min_value=0, value=100)
             
             supplier = st.selectbox("공급업체", ["NPK", "다빈치랩", "바이오땡"])
-            expiration = st.date_input("소비기한", value=datetime.now().date())
+            expiration = st.date_input("소비기한")  # , value=datetime.now().date()
 
             if st.form_submit_button("제품 등록"):
                 # Validate required fields
@@ -1113,9 +1176,17 @@ def show_prediction():
         
         # Get SKU for selected product
         selected_sku = sku_mapping.get(product, None)
+
+        current_date = datetime.now()
+
+        # prediction_months = []
+        # for i in range(1, 4):  # Next 3 months
+        #     future_date = current_date + relativedelta(months=i)
+        #     month_name = f"{future_date.month}월"
+        #     prediction_months.append(month_name)
         
         # Always show 3 months prediction
-        st.info("향후 3개월(8월, 9월, 10월) 예측을 표시합니다.")
+        st.info("향후 3개월(8월, 9월, 10월) 예측을 표시합니다.")  # st.info(f"향후 3개월({prediction_months[0]}, {prediction_months[1]}, {prediction_months[2]}) 예측을 표시합니다.")
         period_days = 90  # Always use 90 days prediction
         
         # 예측 결과 확인
@@ -1228,12 +1299,12 @@ def show_prediction():
                             for row in shipment_data:
                                 if row['마스터_sku'] == selected_sku:
                                     historical_months = [
-                                        {'date': pd.Timestamp(2025, 2, 1), 'value': float(row.get('출고량_25년_2월', 0))},
-                                        {'date': pd.Timestamp(2025, 3, 1), 'value': float(row.get('출고량_25년_3월', 0))},
-                                        {'date': pd.Timestamp(2025, 4, 1), 'value': float(row.get('출고량_25년_4월', 0))},
-                                        {'date': pd.Timestamp(2025, 5, 1), 'value': float(row.get('출고량_25년_5월', 0))},
-                                        {'date': pd.Timestamp(2025, 6, 1), 'value': float(row.get('출고량_25년_6월', 0))},
-                                        {'date': pd.Timestamp(2025, 7, 1), 'value': float(row.get('출고량_25년_7월', 0))}
+                                        {'date': pd.Timestamp(2025, 3, 1), 'value': float(row.get('출고량_5개월전', 0))},
+                                        {'date': pd.Timestamp(2025, 4, 1), 'value': float(row.get('출고량_4개월전', 0))},
+                                        {'date': pd.Timestamp(2025, 5, 1), 'value': float(row.get('출고량_3개월전', 0))},
+                                        {'date': pd.Timestamp(2025, 6, 1), 'value': float(row.get('출고량_2개월전', 0))},
+                                        {'date': pd.Timestamp(2025, 7, 1), 'value': float(row.get('출고량_1개월전', 0))},
+                                        {'date': pd.Timestamp(2025, 8, 1), 'value': float(row.get('출고량_현재월', 0))}
                                     ]
 
                                     break
@@ -1546,14 +1617,13 @@ def show_prediction():
             predictions_data = future_predictions[selected_sku]
             
             if 'forecast_months' in predictions_data:
-                # New model structure - monthly predictions for Aug, Sep, Oct
                 forecast_values = predictions_data.get('arima', [])
                                 
                 if len(forecast_values) >= 3:
                     # Direct monthly predictions
-                    pred_1month = int(forecast_values[0])  # August
-                    pred_2month = int(forecast_values[1])  # September
-                    pred_3month = int(forecast_values[2])  # October
+                    pred_1month = int(forecast_values[0])
+                    pred_2month = int(forecast_values[1])
+                    pred_3month = int(forecast_values[2])
             else:
                 # Old model structure - Get 90-day predictions
                 predictions_90 = future_predictions[selected_sku].get(90, {})
@@ -1575,8 +1645,8 @@ def show_prediction():
                     # Create dataframe with predictions
                     weekly_pred_df = pd.DataFrame({
                         '날짜': prediction_dates,
-                    '출고량': forecast_values
-                })
+                        '출고량': forecast_values
+                    })
                 
                 # Convert to monthly
                 weekly_pred_df['월'] = weekly_pred_df['날짜'].dt.to_period('M')
@@ -1604,34 +1674,34 @@ def show_prediction():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.markdown("**1개월 후 (8월)**")
+                st.markdown("**1개월 후 (8월)**")  # st.markdown(f"**1개월 후 ({prediction_months[0]})**")
                 st.info(f"AI 예측: {pred_1month:,}개")
                 # Use existing adjustment if available, otherwise use AI prediction
                 default_1month = int(existing_adjustment['adjusted_1month']) if existing_adjustment else pred_1month
                 adjusted_1month = st.number_input(
-                    "조정값 (8월)",
+                    "조정값 (8월)",  # f"조정값 ({prediction_months[0]})",
                     min_value=0,
                     value=default_1month if default_1month > 0 else 100,
                     key="adj_1month"
                 )
             
             with col2:
-                st.markdown("**2개월 후 (9월)**")
+                st.markdown("**2개월 후 (9월)**")  # st.markdown(f"**2개월 후 ({prediction_months[1]})**")
                 st.info(f"AI 예측: {pred_2month:,}개")
                 default_2month = int(existing_adjustment['adjusted_2month']) if existing_adjustment else pred_2month
                 adjusted_2month = st.number_input(
-                    "조정값 (9월)",
+                    "조정값 (9월)",  # f"조정값 ({prediction_months[1]})",
                     min_value=0,
                     value=default_2month if default_2month > 0 else 100,
                     key="adj_2month"
                 )
             
             with col3:
-                st.markdown("**3개월 후 (10월)**")
+                st.markdown("**3개월 후 (10월)**")  # st.markdown(f"**3개월 후 ({prediction_months[2]})**")
                 st.info(f"AI 예측: {pred_3month:,}개")
                 default_3month = int(existing_adjustment['adjusted_3month']) if existing_adjustment else pred_3month
                 adjusted_3month = st.number_input(
-                    "조정값 (10월)",
+                    "조정값 (10월)",  # f"조정값 ({prediction_months[2]})",
                     min_value=0,
                     value=default_3month if default_3month > 0 else 100,
                     key="adj_3month"
@@ -1677,11 +1747,11 @@ def show_prediction():
                             # Show month-by-month changes
                             changes = []
                             if pred_1month != adjusted_1month:
-                                changes.append(f"8월: {pred_1month:,} → {adjusted_1month:,}개")
+                                changes.append(f"8월: {pred_1month:,} → {adjusted_1month:,}개")  # changes.append(f"{prediction_months[0]}: {pred_1month:,} → {adjusted_1month:,}개")
                             if pred_2month != adjusted_2month:
-                                changes.append(f"9월: {pred_2month:,} → {adjusted_2month:,}개")
+                                changes.append(f"9월: {pred_2month:,} → {adjusted_2month:,}개")  # changes.append(f"{prediction_months[1]}: {pred_2month:,} → {adjusted_2month:,}개")
                             if pred_3month != adjusted_3month:
-                                changes.append(f"10월: {pred_3month:,} → {adjusted_3month:,}개")
+                                changes.append(f"10월: {pred_3month:,} → {adjusted_3month:,}개")  # changes.append(f"{prediction_months[2]}: {pred_3month:,} → {adjusted_3month:,}개")
                             
                             if changes:
                                 st.info("변경 내역:\n" + "\n".join(changes))
@@ -2154,49 +2224,44 @@ def show_alerts():
     
     with tabs[1]:
         st.subheader("알림 설정")
+    
+        st.markdown("**재고 부족 알림**")
+        stock_alert_days = st.slider(
+            "재고 소진 예상일 기준 (일)",
+            1, 30, 10,
+            help="재고가 N일 내에 소진될 것으로 예상되면 알림"
+        )
         
-        # Notification settings
-        col1, col2 = st.columns(2)
+        st.markdown("**발주 시점 알림**")
+        order_alert_days = st.slider(
+            "발주 필요일 전 알림 (일)",
+            1, 30, 10,
+            help="발주가 필요한 시점 N일 전에 알림"
+        )
+    
+        st.markdown("**소비기한 알림**")
+        expiry_alert_days = st.slider(
+            "소비기한 임박 기준 (일)",
+            7, 90, 30,
+            help="소비기한이 N일 남으면 알림"
+        )
         
-        with col1:
-            st.markdown("**재고 부족 알림**")
-            stock_alert_days = st.slider(
-                "재고 소진 예상일 기준 (일)",
-                1, 30, 10,
-                help="재고가 N일 내에 소진될 것으로 예상되면 알림"
-            )
-            
-            st.markdown("**발주 시점 알림**")
-            order_alert_days = st.slider(
-                "발주 필요일 전 알림 (일)",
-                1, 30, 10,
-                help="발주가 필요한 시점 N일 전에 알림"
-            )
-        
-        with col2:
-            st.markdown("**소비기한 알림**")
-            expiry_alert_days = st.slider(
-                "소비기한 임박 기준 (일)",
-                7, 90, 30,
-                help="소비기한이 N일 남으면 알림"
-            )
-            
-            st.markdown("**과잉 재고 알림**")
-            overstock_ratio = st.slider(
-                "과잉 재고 비율 (%)",
-                100, 500, 200,
-                help="안전재고 대비 N% 이상이면 알림"
-            )
+        # st.markdown("**과잉 재고 알림**")
+        # overstock_ratio = st.slider(
+        #     "과잉 재고 비율 (%)",
+        #     100, 500, 200,
+        #     help="안전재고 대비 N% 이상이면 알림"
+        # )
         
         # Notification channels
         st.markdown("**알림 채널**")
         email_notify = st.checkbox("이메일 알림", value=True)
-        if email_notify:
-            email = st.text_input("이메일 주소", value="biocom@example.com")
+        # if email_notify:
+        #     email = st.text_input("이메일 주소", value="biocom@example.com")
         
         sms_notify = st.checkbox("SMS 알림")
-        if sms_notify:
-            phone = st.text_input("휴대폰 번호", value="010-1234-5678")
+        # if sms_notify:
+        #     phone = st.text_input("휴대폰 번호", value="010-1234-5678")
         
         if st.button("설정 저장", use_container_width=True):
             st.success("알림 설정이 저장되었습니다.")
