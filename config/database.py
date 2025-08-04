@@ -14,11 +14,6 @@ class DatabaseConnection:
     
     def __init__(self):
         self.connection_params = {
-            'host': os.getenv('DB_HOST', 'localhost'),
-            'port': os.getenv('DB_PORT', '5432'),
-            'database': os.getenv('DB_NAME', 'playauto'),
-            'user': os.getenv('DB_USER', 'postgres'),
-            'password': os.getenv('DB_PASSWORD', '')
         }
     
     @contextmanager
