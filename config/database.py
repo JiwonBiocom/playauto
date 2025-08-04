@@ -303,21 +303,22 @@ class ShipmentQueries:
             상품명,
             SUM(CASE WHEN CURRENT_DATE - INTERVAL '6 months' <= make_date(year::int, month::int, 1) 
                      AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '5 months' 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_2월,
+                     THEN 월별출고량 ELSE 0 END) as 출고량_5개월전,
             SUM(CASE WHEN CURRENT_DATE - INTERVAL '5 months' <= make_date(year::int, month::int, 1) 
                      AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '4 months' 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_3월,
+                     THEN 월별출고량 ELSE 0 END) as 출고량_4개월전,
             SUM(CASE WHEN CURRENT_DATE - INTERVAL '4 months' <= make_date(year::int, month::int, 1) 
                      AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '3 months' 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_4월,
+                     THEN 월별출고량 ELSE 0 END) as 출고량_3개월전,
             SUM(CASE WHEN CURRENT_DATE - INTERVAL '3 months' <= make_date(year::int, month::int, 1) 
                      AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '2 months' 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_5월,
+                     THEN 월별출고량 ELSE 0 END) as 출고량_2개월전,
             SUM(CASE WHEN CURRENT_DATE - INTERVAL '2 months' <= make_date(year::int, month::int, 1) 
                      AND make_date(year::int, month::int, 1) < CURRENT_DATE - INTERVAL '1 month' 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_6월,
-            SUM(CASE WHEN CURRENT_DATE - INTERVAL '1 month' <= make_date(year::int, month::int, 1) 
-                     THEN 월별출고량 ELSE 0 END) as 출고량_25년_7월
+                     THEN 월별출고량 ELSE 0 END) as 출고량_1개월전,
+            SUM(CASE WHEN EXTRACT(YEAR FROM CURRENT_DATE) = year::int 
+                    AND EXTRACT(MONTH FROM CURRENT_DATE) = month::int
+                    THEN 월별출고량 ELSE 0 END) as 출고량_현재월
         FROM monthly_data
         GROUP BY 마스터_sku, 상품명
         ORDER BY 마스터_sku
