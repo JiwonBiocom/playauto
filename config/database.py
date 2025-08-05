@@ -16,8 +16,8 @@ class DatabaseConnection:
         self.connection_params = {
             'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '5432'),
-            'database': os.getenv('DB_NAME', 'playauto'),
-            'user': os.getenv('DB_USER', 'playautouser'),
+            'database': os.getenv('DB_NAME', 'dify'),
+            'user': os.getenv('DB_USER', 'difyuser'),
             'password': os.getenv('DB_PASSWORD', '')
         }
     
@@ -200,13 +200,13 @@ class ProductQueries:
         return None
     
     @staticmethod
-    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration):
+    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
         query = """
         INSERT INTO playauto_product_inventory 
-        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, lead_time, moq, safety_stock, supplier, expiration))
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
     
     @staticmethod
     def update_product(master_sku: str, **kwargs):
@@ -264,6 +264,36 @@ class ProductQueries:
     
     @staticmethod
     def adjust_history(master_sku: str, current_stock: int, new_stock_level: int, reason: str, name: str, id: str):
+        """Original and updated inventory and the reason for it"""
+        query = """
+        INSERT INTO playauto_inventory_adjust 
+        (마스터_sku, 현재재고, 실제재고, 사유, 작업자명, 작업자_id) 
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (master_sku, current_stock, new_stock_level, reason, name, id))
+    
+    @staticmethod
+    def save_update_history(master_sku: str, product_name: str, old_values: dict, new_values: dict, user_id: str, user_name: str):
+        """Save product update history"""
+        query = """
+        INSERT INTO playauto_update_history
+        (마스터_SKU, 상품명, 
+         리드타임_old, 최소주문수량_old, 안전재고_old, 소비기한_old, 제조사_old,
+         리드타임_new, 최소주문수량_new, 안전재고_new, 소비기한_new, 제조사_new,
+         수정자_id, 수정자명)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (
+            master_sku, product_name,
+            old_values.get('리드타임'), old_values.get('최소주문수량'), 
+            old_values.get('안전재고'), old_values.get('소비기한'), old_values.get('제조사'),
+            new_values.get('리드타임'), new_values.get('최소주문수량'), 
+            new_values.get('안전재고'), new_values.get('소비기한'), new_values.get('제조사'),
+            user_id, user_name
+        ))
+    
+    @staticmethod
+    def adjust_inventory_history(master_sku: str, current_stock: int, new_stock_level: int, reason: str, name: str, id: str):
         """Original and updated inventory and the reason for it"""
         query = """
         INSERT INTO playauto_inventory_adjust 
