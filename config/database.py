@@ -16,8 +16,8 @@ class DatabaseConnection:
         self.connection_params = {
             'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '5432'),
-            'database': os.getenv('DB_NAME', 'dify'),
-            'user': os.getenv('DB_USER', 'difyuser'),
+            'database': os.getenv('DB_NAME', 'playauto'),
+            'user': os.getenv('DB_USER', 'playautouser'),
             'password': os.getenv('DB_PASSWORD', '')
         }
     
