@@ -14,6 +14,7 @@ from dateutil.relativedelta import relativedelta
 # Import database connection and queries
 from config.database import db, MemberQueries, ProductQueries, ShipmentQueries, PredictionQueries
 from utils.calculations import get_inventory_status, calculate_stockout_date
+from utils.email_alerts import EmailAlertSystem
 
 # Load environment variables
 load_dotenv()
@@ -50,7 +51,7 @@ def sidebar_navigation():
         "제품 관리": "product_management",
         "재고 관리": "inventory",
         "수요 예측": "prediction",
-        "알림 설정": "alerts"
+        "알림": "alerts"
     }
     
     for label, page in menu_items.items():
@@ -79,10 +80,10 @@ def sidebar_navigation():
 
 # Member join page
 def show_member_join():
-    st.title("PLAYAUTO 회원가입")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        st.title("PLAYAUTO 회원가입")
         with st.form("join_form"):
             st.subheader("회원 정보 입력")
             
@@ -144,12 +145,12 @@ def main():
         if st.session_state.member_join:
             show_member_join()
             return
-            
-        st.title("PLAYAUTO 로그인")
 
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
+            st.title("PLAYAUTO 이커머스를 위한 플랫폼")
             with st.form("login_form"):
+                st.subheader("로그인")
                 username = st.text_input("사용자명")
                 password = st.text_input("비밀번호", type="password")
                 if st.form_submit_button("로그인", use_container_width=True):
@@ -206,6 +207,7 @@ def show_dashboard():
             df_metrics['현재재고'] = pd.to_numeric(df_metrics['현재재고'], errors='coerce').fillna(0)
             df_metrics['안전재고'] = pd.to_numeric(df_metrics['안전재고'], errors='coerce').fillna(0)
             df_metrics['출고량'] = pd.to_numeric(df_metrics['출고량'], errors='coerce').fillna(0)
+            df_metrics['리드타임'] = pd.to_numeric(df_metrics['리드타임'], errors='coerce').fillna(0)
             
             total_products = len(df_metrics)
             low_stock = len(df_metrics[df_metrics['현재재고'] < df_metrics['안전재고']])
@@ -217,7 +219,8 @@ def show_dashboard():
                 daily_usage = row['출고량'] / 30 if row['출고량'] > 0 else 0
                 if daily_usage > 0:
                     days_until_stockout = row['현재재고'] / daily_usage
-                    if days_until_stockout <= 7:
+                    days_until_reorder_needed = days_until_stockout - row['리드타임']
+                    if days_until_reorder_needed <= 7:
                         need_order_soon += 1
         else:
             total_products = 0
@@ -283,16 +286,16 @@ def show_dashboard():
                     status = '정상'
                 status_list.append(status)
             
-            inventory_data['예상 소진일'] = stockout_dates
-            inventory_data['발주 필요'] = status_list
+            inventory_data['재고 소진 예상일'] = stockout_dates
+            inventory_data['발주 필요 여부'] = status_list
         else:
             # Fallback to sample data if no DB data
             inventory_data = pd.DataFrame({
                 '제품명': ['데이터 없음'],
                 '현재 재고': [0],
                 '안전재고': [0],
-                '예상 소진일': ['N/A'],
-                '발주 필요': ['N/A']
+                '재고 소진 예상일': ['N/A'],
+                '발주 필요 여부': ['N/A']
             })
     except Exception as e:
         st.error(f"데이터베이스 연결 오류: {str(e)}")
@@ -301,15 +304,15 @@ def show_dashboard():
             '제품명': ['연결 오류'],
             '현재 재고': [0],
             '안전재고': [0],
-            '예상 소진일': ['N/A'],
-            '발주 필요': ['오류']
+            '재고 소진 예상일': ['N/A'],
+            '발주 필요 여부': ['오류']
         })
     
     # Color coding for status
     def highlight_status(row):
-        if row['발주 필요'] == '긴급':
+        if row['발주 필요 여부'] == '긴급':
             return ['background-color: #ffcccc'] * len(row)
-        elif row['발주 필요'] == '주의':
+        elif row['발주 필요 여부'] == '주의':
             return ['background-color: #f7dd65'] * len(row)
         return [''] * len(row)
     
@@ -706,7 +709,7 @@ def show_product_management():
     
     with tabs[0]:
         st.subheader("제품 목록")
-        st.info("아래 제품의 최소주문수량, 리드타임, 안전재고, 소비기한을 수정하시고 변경사항 저장을 누르세요.")
+        st.info("아래 제품의 최소주문수량, 리드타임, 안전재고, 소비기한 정보를 수정하시고 변경사항 저장을 누르세요.")
 
         # Show success message if exists in session state
         if 'product_update_message' in st.session_state:
@@ -770,7 +773,7 @@ def show_product_management():
                         
                         # Check each editable field
                         if products_df.iloc[idx]['최소주문수량'] != edited_df.iloc[idx]['최소주문수량']:
-                            updates['최소주문수량'] = int(edited_df.iloc[idx]['MO최소주문수량Q'])
+                            updates['최소주문수량'] = int(edited_df.iloc[idx]['최소주문수량'])
                             row_changed = True
                         
                         if products_df.iloc[idx]['리드타임'] != edited_df.iloc[idx]['리드타임']:
@@ -785,12 +788,37 @@ def show_product_management():
                             updates['소비기한'] = edited_df.iloc[idx]['소비기한']
                             row_changed = True
                         
+                        # if products_df.iloc[idx]['제조사'] != edited_df.iloc[idx]['제조사']:
+                        #     updates['제조사'] = edited_df.iloc[idx]['제조사']
+                        #     row_changed = True
+                        
                         # If changes were made to this row, update the database
                         if row_changed:
                             try:
+                                # Prepare old values for history (convert numpy types to Python native types)
+                                old_values = {
+                                    '리드타임': int(products_df.iloc[idx]['리드타임']) if pd.notna(products_df.iloc[idx]['리드타임']) else None,
+                                    '최소주문수량': int(products_df.iloc[idx]['최소주문수량']) if pd.notna(products_df.iloc[idx]['최소주문수량']) else None,
+                                    '안전재고': int(products_df.iloc[idx]['안전재고']) if pd.notna(products_df.iloc[idx]['안전재고']) else None,
+                                    '소비기한': products_df.iloc[idx]['소비기한'],
+                                    # '제조사': products_df.iloc[idx].get('제조사', '')
+                                }
+                                
+                                # Update the product
                                 rows_affected = ProductQueries.update_product(master_sku, **updates)
                                 if rows_affected > 0:
                                     changes_made = True
+                                    
+                                    # Save history
+                                    if 'user_info' in st.session_state:
+                                        ProductQueries.save_update_history(
+                                            master_sku,
+                                            products_df.iloc[idx]['상품명'],
+                                            old_values,
+                                            updates,
+                                            st.session_state.user_info['id'],
+                                            st.session_state.user_info['name']
+                                        )
                                 else:
                                     errors.append(f"제품 {master_sku} 업데이트 실패")
                             except Exception as e:
@@ -867,7 +895,9 @@ def show_product_management():
                             moq=moq,
                             safety_stock=safety_stock,
                             supplier=supplier,
-                            expiration=expiration
+                            expiration=expiration,
+                            user_id=st.session_state.user_info['id'] if 'user_info' in st.session_state else '', 
+                            user_name=st.session_state.user_info['name'] if 'user_info' in st.session_state else ''
                         )
                         
                         if rows_affected > 0:
@@ -883,11 +913,12 @@ def show_product_management():
 def show_inventory():
     st.title("📦 재고 관리")
     
-    tabs = st.tabs(["재고 관리하기", "재고 조정"])
+    tabs = st.tabs(["입출고 조정", "재고 조정"])
     
     with tabs[0]:
         st.subheader("재고 관리 템플릿 다운로드")
         st.info("상품별 입출고 수량을 수정할 수 있는 페이지입니다. 엑셀 템플릿을 다운로드하여 상품별로 입고 출고 수량만 입력해서 업로드해주세요.")
+        st.info("입력하신 출입고 양만큼 현재 재고 값이 변동됩니다.")
         
         # Load product data from database for template
         try:
@@ -905,7 +936,7 @@ def show_inventory():
                     '출고량': [0] * len(df)
                 })
             else:
-                # Fallback to sample template
+                # 샘플
                 inventory_df = pd.DataFrame({
                     '마스터 SKU': ['VIT-C-1000', 'OMEGA-3-500', 'PROBIO-10B'],
                     '플레이오토 SKU': ['PA-001', 'PA-002', 'PA-003'],
@@ -917,7 +948,7 @@ def show_inventory():
                     '출고량': [0, 0, 0]
                 })
         except:
-            # Fallback to sample template
+            # 샘플
             inventory_df = pd.DataFrame({
                 '마스터 SKU': ['VIT-C-1000', 'OMEGA-3-500', 'PROBIO-10B'],
                 '플레이오토 SKU': ['PA-001', 'PA-002', 'PA-003'],
@@ -929,9 +960,9 @@ def show_inventory():
                 '출고량': [0, 0, 0]
             })
         
-        st.dataframe(inventory_df, hide_index=True)  # 데이터베이스에서 불러올까?
+        st.dataframe(inventory_df, hide_index=True)
 
-        # Convert to Excel
+        # 엑셀로 변환
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             inventory_df.to_excel(writer, index=False, sheet_name='Sheet1')
@@ -1102,12 +1133,12 @@ def show_inventory():
                                 st.session_state.user_id
                             )
                         
-                        # Store success message in session state
-                        st.session_state.inventory_adjust_message = f"{product}의 재고가 {actual_stock}개로 조정되었습니다."
-                        
                         # Store adjustment details if there's a difference
                         if adjustment != 0:
                             st.session_state.inventory_adjust_details = f"조정 내역: {current_stock}개 → {actual_stock}개 (차이: {adjustment:+d}개)"
+                        
+                        # Store success message in session state
+                        st.session_state.inventory_adjust_message = f"{product}의 재고가 {actual_stock}개로 조정되었습니다."
                         
                         st.rerun()  # Refresh to show updated stock
                     else:
@@ -1123,7 +1154,7 @@ def show_inventory():
 def show_prediction():
     st.title("🔮 수요 예측")
     
-    tabs = st.tabs(["예측 결과", "수동 조정"])
+    tabs = st.tabs(["예측 결과 확인", "예측 결과 수동 조정"])
     
     with tabs[0]:
         st.subheader("AI 기반 수요 예측")
@@ -1186,7 +1217,7 @@ def show_prediction():
         #     prediction_months.append(month_name)
         
         # Always show 3 months prediction
-        st.info("향후 3개월(8월, 9월, 10월) 예측을 표시합니다.")  # st.info(f"향후 3개월({prediction_months[0]}, {prediction_months[1]}, {prediction_months[2]}) 예측을 표시합니다.")
+        st.info("향후 3개월에 대한 예측을 표시합니다.")  # st.info(f"향후 3개월({prediction_months[0]}, {prediction_months[1]}, {prediction_months[2]}) 예측을 표시합니다.")
         period_days = 90  # Always use 90 days prediction
         
         # 예측 결과 확인
@@ -1758,8 +1789,8 @@ def show_prediction():
                             
                             st.info(f"조정자: biocom | 시간: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
                             
-                            # Refresh the page to show the new adjustment
-                            st.rerun()
+                            # # Refresh the page to show the new adjustment
+                            # st.rerun()
                         else:
                             st.error("조정값 저장에 실패했습니다.")
                     else:
@@ -1770,7 +1801,7 @@ def show_prediction():
 
 # Alerts page
 def show_alerts():
-    st.title("🔔 알림 설정")
+    st.title("🔔 알림")
     
     tabs = st.tabs(["알림 목록", "알림 설정", "알림 이력"])
     
@@ -1813,16 +1844,16 @@ def show_alerts():
             products = ProductQueries.get_all_products()
             if products:
                 for product in products:
-                    current_stock = product['현재재고']
-                    safety_stock = product['안전재고']
+                    current_stock = product['현재재고'] or 0
+                    safety_stock = product['안전재고'] or 0
                     product_name = product['상품명']
-                    lead_time = product['리드타임']
+                    lead_time = product['리드타임'] or 30
                     
-                    daily_usage = product['출고량'] / 30 if product['출고량'] > 0 else 0  # 예측 출고량 대체 자원
+                    daily_usage = product['출고량'] / 30 if product['출고량'] and product['출고량'] > 0 else 0  # 예측 출고량 대체 자원
 
                     # # 재고부족 확인 (low stock)
                     # 긴급
-                    if current_stock < safety_stock * 0.5:
+                    if safety_stock > 0 and current_stock < safety_stock * 0.5:
                         # Critical - less than 50% of safety stock
                         alerts_list.append({
                             '유형': '재고 부족',
@@ -1834,7 +1865,7 @@ def show_alerts():
                         })
                     
                     # 주의
-                    elif current_stock < safety_stock:
+                    elif safety_stock > 0 and current_stock < safety_stock:
                         # Warning - below safety stock
                         alerts_list.append({
                             '유형': '재고 부족', 
@@ -1964,7 +1995,7 @@ def show_alerts():
                     
                     # # 발주 시점 확인 (reorder point)
                     # 주의
-                    if daily_usage > 0 and current_stock > safety_stock:
+                    if daily_usage > 0 and safety_stock > 0 and current_stock > safety_stock:
                         # Calculate when inventory will drop below safety stock
                         days_until_below_safety = (current_stock - safety_stock) / daily_usage
                         
@@ -1973,7 +2004,7 @@ def show_alerts():
                         if ai_safety_stock and current_stock > ai_safety_stock:
                             days_until_below_ai_safety = (current_stock - ai_safety_stock) / daily_usage
                         
-                        # (현재 재고 < 안전재고) 이 되기 10일 전에는 what발주 알림이 발생해야
+                        # (현재 재고 < 안전재고) 이 되기 10일 전에는 발주 알림이 발생해야
                         if days_until_below_safety <= 10:
                             ai_message = ''
                             if days_until_below_ai_safety:
@@ -1999,7 +2030,7 @@ def show_alerts():
                             })
                     
                     # 긴급 (현재재고가 안전재고량 이하일 경우)
-                    elif daily_usage > 0 and current_stock <= safety_stock:
+                    elif daily_usage > 0 and safety_stock > 0 and current_stock <= safety_stock:
                         days_until_stockout = current_stock / daily_usage
                         
                         # If stockout will happen before new order arrives
@@ -2026,6 +2057,65 @@ def show_alerts():
                                 # '메시지_수요예측': ai_message,
                                 # '발생일시': datetime.now()
                             })
+                    
+                    # 소비기한 임박 체크
+                    if product.get('소비기한'):
+                        try:
+                            # Convert expiry date to datetime if it's a string
+                            expiry_date = product['소비기한']
+                            if isinstance(expiry_date, str):
+                                expiry_date = pd.to_datetime(expiry_date).date()
+                            elif hasattr(expiry_date, 'date'):
+                                expiry_date = expiry_date.date()
+                            
+                            # Calculate days until expiry
+                            today = datetime.now().date()
+                            days_until_expiry = (expiry_date - today).days
+                            
+                            # Check if expiry alert is needed (based on slider value from settings)
+                            expiry_alert_threshold = st.session_state.get('alert_settings', {}).get('expiry_alert_days', 30)
+                            
+                            if days_until_expiry <= expiry_alert_threshold and days_until_expiry >= 0:
+                                # Determine status based on days remaining
+                                if days_until_expiry <= 7:
+                                    status = '긴급'
+                                    # priority_msg = '즉시 할인 판매 필요'
+                                elif days_until_expiry <= 14:
+                                    status = '경고'
+                                    # priority_msg = '할인 판매 준비'
+                                elif days_until_expiry <= 21:
+                                    status = '주의'
+                                    # priority_msg = '판매 계획 검토'
+                                else:
+                                    status = ''
+                                    # priority_msg = '모니터링 중'
+                                
+                                alerts_list.append({
+                                    '유형': '소비기한 임박',
+                                    '제품': product_name,
+                                    '현재 재고량': current_stock,
+                                    '소비기한': expiry_date.strftime('%Y-%m-%d'),
+                                    '남은 일수': days_until_expiry,
+                                    '상태': status,
+                                    '메시지': f'소비기한 {days_until_expiry}일 남음',  #  - {priority_msg}
+                                    # '권장 조치': priority_msg
+                                })
+                            elif days_until_expiry < 0:
+                                # Already expired
+                                alerts_list.append({
+                                    '유형': '소비기한 임박',
+                                    '제품': product_name,
+                                    '현재 재고량': current_stock,
+                                    '소비기한': expiry_date.strftime('%Y-%m-%d'),
+                                    '남은 일수': days_until_expiry,
+                                    '상태': '긴급',
+                                    '메시지': f'소비기한 {abs(days_until_expiry)}일 경과 - 즉시 처리 필요',
+                                    # '권장 조치': '즉시 폐기 또는 반품 처리'
+                                })
+                                
+                        except Exception as e:
+                            # Handle date parsing errors
+                            continue
                     
                     # # 과잉 재고 확인 (oversupplement)
                     if daily_usage > 0:  # Only check if product has usage
@@ -2057,6 +2147,8 @@ def show_alerts():
                 columns_order = ['유형', '제품', '상태']
                 if '발주 시점' in alert_types and any(a['유형'] == '발주 시점' for a in filtered_alerts):
                     columns_order += ['수요 추이', '안전재고량', '현재 재고량', '리드타임', '수요예측', '예상 소비일', '메시지']
+                elif '소비기한 임박' in alert_types and any(a['유형'] == '소비기한 임박' for a in filtered_alerts):
+                    columns_order += ['현재 재고량', '소비기한', '남은 일수', '권장 조치', '메시지']
                 else:
                     columns_order += ['메시지']
                 columns_order += ['발생일시']
@@ -2153,6 +2245,19 @@ def show_alerts():
                     "메시지(AI)",
                     help="AI 예측 기준으로 생성된 알림 메시지"
                 ),
+                '소비기한': st.column_config.DateColumn(
+                    help="제품의 소비기한",
+                    width="small"
+                ),
+                '남은 일수': st.column_config.NumberColumn(
+                    help="소비기한까지 남은 일수",
+                    width="small",
+                    format="%d일"
+                ),
+                '권장 조치': st.column_config.TextColumn(
+                    help="소비기한 임박에 따른 권장 조치사항",
+                    width="medium"
+                ),
                 '발생일시': st.column_config.DatetimeColumn(
                     help="알림이 발생한 시각",
                     format="MM/DD HH:mm"
@@ -2172,18 +2277,19 @@ def show_alerts():
                 products = ProductQueries.get_all_products()
                 if products:
                     for product in products:
-                        current_stock = product['현재재고']
-                        safety_stock = product['안전재고']
-                        moq = product['최소주문수량']
-                        lead_time = product['리드타임']
+                        current_stock = product['현재재고'] or 0
+                        safety_stock = product['안전재고'] or 0
+                        moq = product['최소주문수량'] or 1
+                        lead_time = product['리드타임'] or 30
+                        outbound = product['출고량'] or 0
                         
                         # Calculate if reorder is needed
-                        daily_usage = product['출고량'] / 30 if product['출고량'] > 0 else 0
+                        daily_usage = outbound / 30 if outbound > 0 else 0
                         if daily_usage > 0:
                             days_until_stockout = current_stock / daily_usage
                             
                             # Need to order if stock will run out within lead time + buffer
-                            if days_until_stockout <= lead_time * 1.5 or current_stock < safety_stock:
+                            if days_until_stockout <= lead_time * 1.5 or (safety_stock > 0 and current_stock < safety_stock):
                                 # Calculate recommended order quantity
                                 # Order enough for lead time + safety period (e.g., 30 days)
                                 recommended_qty = max(
@@ -2224,7 +2330,7 @@ def show_alerts():
     
     with tabs[1]:
         st.subheader("알림 설정")
-    
+
         st.markdown("**재고 부족 알림**")
         stock_alert_days = st.slider(
             "재고 소진 예상일 기준 (일)",
@@ -2238,7 +2344,7 @@ def show_alerts():
             1, 30, 10,
             help="발주가 필요한 시점 N일 전에 알림"
         )
-    
+
         st.markdown("**소비기한 알림**")
         expiry_alert_days = st.slider(
             "소비기한 임박 기준 (일)",
@@ -2256,14 +2362,93 @@ def show_alerts():
         # Notification channels
         st.markdown("**알림 채널**")
         email_notify = st.checkbox("이메일 알림", value=True)
-        # if email_notify:
-        #     email = st.text_input("이메일 주소", value="biocom@example.com")
+        email = None
         
-        sms_notify = st.checkbox("SMS 알림")
+        if email_notify:
+            # Get user email from database
+            try:
+                current_user = MemberQueries.get_member_by_id(st.session_state.user_id)
+                user_email = current_user['email'] if current_user else ''
+            except:
+                user_email = ''
+            email = st.text_input("이메일 주소", value=user_email or "biocom@example.com")
+        
+        # sms_notify = st.checkbox("SMS 알림")
+        # phone = None
         # if sms_notify:
         #     phone = st.text_input("휴대폰 번호", value="010-1234-5678")
         
+        # Test email button
+        if email_notify and email:
+            if st.button("📧 테스트 이메일 발송", use_container_width=True):
+                # Collect current alerts
+                alerts_for_email = []
+                try:
+                    products = ProductQueries.get_all_products()
+                    if products:
+                        for product in products:
+                            current_stock = product['현재재고']
+                            safety_stock = product['안전재고']
+                            
+                            # Check if stock alert is needed
+                            daily_usage = product['출고량'] / 30 if product['출고량'] > 0 else 0
+                            if daily_usage > 0:
+                                days_until_stockout = current_stock / daily_usage
+                                
+                                if days_until_stockout <= stock_alert_days:
+                                    stockout_date = (datetime.now() + pd.Timedelta(days=days_until_stockout)).strftime('%Y-%m-%d')
+                                    status = '긴급' if safety_stock > 0 and current_stock < safety_stock * 0.5 else '주의'
+                                    
+                                    alerts_for_email.append({
+                                        '제품': product['상품명'],
+                                        '현재 재고량': current_stock,
+                                        '안전재고량': safety_stock,
+                                        '예상 소진일': stockout_date,
+                                        '리드타임': product['리드타임'],
+                                        '상태': status,
+                                        '메시지': f'{int(days_until_stockout)}일 후 재고 소진 예상'
+                                    })
+                    
+                    if alerts_for_email:
+                        # Send test email
+                        email_system = EmailAlertSystem()
+                        
+                        if not email_system.is_configured:
+                            # Show preview instead
+                            st.warning("SMTP가 설정되지 않았습니다. 이메일 미리보기를 생성합니다.")
+                            preview_path = email_system.save_alert_preview(email, alerts_for_email)
+                            if preview_path:
+                                st.success("이메일 미리보기가 생성되었습니다.")
+                                
+                                # Show the HTML content in expandable section
+                                with st.expander("📧 이메일 미리보기"):
+                                    with open(preview_path, 'r', encoding='utf-8') as f:
+                                        html_content = f.read()
+                                    st.components.v1.html(html_content, height=600, scrolling=True)
+                                
+                                st.info("실제 이메일을 발송하려면 EMAIL_SETUP.md 파일을 참고하여 SMTP 설정을 완료해주세요.")
+                        else:
+                            if email_system.send_inventory_alert(email, alerts_for_email):
+                                st.success(f"테스트 이메일이 {email}로 발송되었습니다.")
+                            else:
+                                st.error("이메일 발송에 실패했습니다. SMTP 설정을 확인해주세요.")
+                    else:
+                        st.info("현재 알림이 필요한 제품이 없습니다.")
+                        
+                except Exception as e:
+                    st.error(f"이메일 발송 오류: {str(e)}")
+        
         if st.button("설정 저장", use_container_width=True):
+            # Save alert settings to session state or database
+            st.session_state.alert_settings = {
+                'stock_alert_days': stock_alert_days,
+                'order_alert_days': order_alert_days,
+                'expiry_alert_days': expiry_alert_days,
+                'email_notify': email_notify,
+                'email': email if email_notify else None,
+                'sms_notify': sms_notify,
+                'phone': phone if sms_notify else None
+            }
             st.success("알림 설정이 저장되었습니다.")
     
     with tabs[2]:
