@@ -379,101 +379,6 @@ def show_dashboard():
         st.bar_chart(pd.DataFrame({
             '재고량': [0]
         }, index=['오류']))
-    
-    # # Charts
-    # col1, col2 = st.columns(2)
-    # with col1:
-    #     st.subheader("월별 출고량 추이")
-        
-    #     # Get actual monthly shipment data from database
-    #     try:
-    #         monthly_shipments = ShipmentQueries.get_total_monthly_shipments()
-            
-    #         if monthly_shipments:
-    #             # Convert to DataFrame
-    #             df_monthly = pd.DataFrame(monthly_shipments)
-                
-    #             # Create a date range for the last 6 months
-    #             # Set end date to July 2025 (last historical month)
-    #             end_date = pd.Timestamp(2025, 7, 31)
-    #             start_date = end_date - pd.DateOffset(months=6) + pd.DateOffset(days=1)  # 6 months total including July
-    #             date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-                
-    #             # Create a complete dataframe with all months
-    #             all_months = pd.DataFrame({
-    #                 'month': [d.strftime('%Y-%m') for d in date_range],
-    #                 'total_shipment': 0
-    #             })
-                
-    #             # Merge with actual data
-    #             if not df_monthly.empty:
-    #                 all_months = all_months.merge(df_monthly, on='month', how='left', suffixes=('', '_actual'))
-    #                 all_months['total_shipment'] = all_months['total_shipment_actual'].fillna(0).astype(int)
-    #                 all_months = all_months[['month', 'total_shipment']]
-                
-    #             # Create month labels
-    #             month_labels = []
-    #             for month_str in all_months['month']:
-    #                 year, month = month_str.split('-')
-    #                 month_labels.append(f"{year[2:]}년 {int(month)}월")
-                
-    #             # Create chart dataframe
-    #             chart_df = pd.DataFrame({
-    #                 '출고량': all_months['total_shipment'].tolist()
-    #             }, index=month_labels)
-                
-    #             # Display line chart
-    #             st.line_chart(chart_df)
-    #         else:
-    #             # No data - show empty chart with message
-    #             st.info("출고 데이터가 없습니다. 입출고 데이터를 먼저 등록해주세요.")
-    #             # Show temporary data as fallback
-    #             df_shipment = pd.DataFrame({
-    #                 '출고량': [0, 0, 0, 0, 0, 0]
-    #             }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
-    #             st.line_chart(df_shipment)
-                
-    #     except Exception as e:
-    #         st.error(f"데이터 로드 오류: {str(e)}")
-    #         # Fallback to sample data
-    #         df_shipment = pd.DataFrame({
-    #             '출고량': [3000, 3200, 2800, 3500, 3300, 3600]
-    #         }, index=['25년_2월', '25년_3월', '25년_4월', '25년_5월', '25년_6월', '25년_7월'])
-    #         st.line_chart(df_shipment)
-    
-    # with col2:
-    #     st.subheader("카테고리별 재고 현황")
-        
-    #     # Get category inventory data from database
-    #     try:
-    #         all_products = ProductQueries.get_all_products()
-    #         if all_products:
-    #             df_products = pd.DataFrame(all_products)
-                
-    #             # Group by category and sum the current inventory
-    #             category_inventory = df_products.groupby('카테고리')['현재재고'].sum().to_dict()
-                
-    #             # Create dataframe for chart
-    #             if category_inventory:
-    #                 inventory_df = pd.DataFrame({
-    #                     '재고량': list(category_inventory.values())
-    #                 }, index=list(category_inventory.keys()))
-                    
-    #                 st.bar_chart(inventory_df)
-    #             else:
-    #                 # Fallback if no data
-    #                 st.info("카테고리별 재고 데이터가 없습니다.")
-    #         else:
-    #             # Fallback to sample data if no products
-    #             st.bar_chart(pd.DataFrame({
-    #                 '재고량': [0]
-    #             }, index=['데이터 없음']))
-    #     except Exception as e:
-    #         st.error(f"데이터 로드 오류: {str(e)}")
-    #         # Fallback to sample data on error
-    #         st.bar_chart(pd.DataFrame({
-    #             '재고량': [0]
-    #         }, index=['오류']))
 
 # 출고량 확인
 def show_shipment_quantity():
@@ -566,155 +471,13 @@ def show_shipment_quantity():
                     )
                     
                     # Display line chart
-                    st.line_chart(chart_df)
-                
-                # # Add chart for trend visualization
-                # st.subheader("월별 출고량 추이")
-                
-                # # Prepare data for line chart showing total monthly shipments
-                # months = ['6개월전', '5개월전', '4개월전', '3개월전', '2개월전', '1개월전']
-                
-                # # Calculate total shipments per month
-                # monthly_totals = []
-                # for month in months:
-                #     total = df_display[month].sum()
-                #     monthly_totals.append(total)
-                
-                # # Create chart data - just like the working example
-                # chart_data = pd.DataFrame({
-                #     '출고량': monthly_totals
-                # })
-                
-                # # Display line chart
-                # st.line_chart(chart_data)
-                
-                # # Optional: Show individual product trends
-                # with st.expander("개별 제품 출고량 추이"):
-                #     # Select product for individual visualization
-                #     product_list = df_display['상품명'].tolist()
-                #     selected_product = st.selectbox("제품 선택", product_list)
-                    
-                #     # Get data for selected product
-                #     product_row = df_display[df_display['상품명'] == selected_product].iloc[0]
-                #     values = [product_row[month] for month in months]
-                    
-                #     # Create individual product chart
-                #     individual_chart_data = pd.DataFrame({
-                #         '출고량': values
-                #     })
-                    
-                #     st.line_chart(individual_chart_data)
-                
+                    st.line_chart(chart_df)   
             else:
                 st.warning("출고 데이터가 없습니다.")
-                st.info("playauto_shipment_receipt 테이블에 데이터를 추가해주세요.")
-                
+                st.info("playauto_shipment_receipt 테이블에 데이터를 추가해주세요.")      
         except Exception as e:
             st.error(f"데이터 로드 중 오류 발생: {str(e)}")
             st.info("데이터베이스 연결을 확인하거나 테이블 구조를 확인해주세요.")
-    
-    # with tabs[1]:
-    #     st.subheader("입출고 관리 템플릿 다운로드")
-    #     st.info("엑셀 템플릿을 다운로드하여 입출고 수량을 입력한 후 업로드해주세요.")
-        
-    #     # Create empty template with one row
-    #     shipment_df = pd.DataFrame({
-    #         '마스터 SKU': ['상품1', '상품2', '상품3'], 
-    #         '입출고_여부': ['출고', '출고', '입고'], 
-    #         '수량': [10, 10, 20] 
-    #     })
-    #     st.dataframe(shipment_df, hide_index=True)
-
-    #     # Convert to Excel
-    #     buffer = io.BytesIO()
-    #     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-    #         shipment_df.to_excel(writer, index=False, sheet_name='Sheet1')
-        
-    #     st.download_button(
-    #         label="📥 템플릿 다운로드",
-    #         data=buffer.getvalue(),
-    #         file_name=f"shipment_template_{datetime.now().strftime('%Y%m%d')}.xlsx",
-    #         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    #         use_container_width=True
-    #     )
-        
-    #     st.subheader("입출고 데이터 업로드")
-        
-    #     uploaded_file = st.file_uploader(
-    #         "입출고 파일 업로드 (CSV, Excel)",
-    #         type=['csv', 'xlsx', 'xls']
-    #     )
-        
-    #     if uploaded_file is not None:
-    #         # Read file
-    #         try:
-    #             if uploaded_file.name.endswith('.csv'):
-    #                 try:
-    #                     # Try UTF-8 first
-    #                     df = pd.read_csv(uploaded_file, encoding='utf-8')
-    #                 except UnicodeDecodeError:
-    #                     # Try CP949 (Korean encoding)
-    #                     uploaded_file.seek(0)
-    #                     try:
-    #                         df = pd.read_csv(uploaded_file, encoding='cp949')
-    #                     except UnicodeDecodeError:
-    #                         # Try EUC-KR
-    #                         uploaded_file.seek(0)
-    #                         df = pd.read_csv(uploaded_file, encoding='euc-kr')
-    #             else:
-    #                 df = pd.read_excel(uploaded_file)
-    #         except Exception as e:
-    #             st.error(f"파일 읽기 오류: {str(e)}")
-    #             st.info("CSV 파일의 경우 인코딩 문제가 있을 수 있습니다. Excel 파일(.xlsx)로 변환 후 업로드해주세요.")
-    #             return
-            
-    #         st.dataframe(df, use_container_width=True)
-            
-    #         col1, col2 = st.columns(2)
-    #         with col1:
-    #             if st.button("✅ 재고 업데이트", use_container_width=True):
-    #                 try:
-    #                     # 입출고 테이블에 데이터 올리기
-    #                     success_count = 0
-    #                     error_count = 0
-    #                     errors = []
-                        
-    #                     for _, row in df.iterrows():
-    #                         try:
-    #                             # Extract data from row
-    #                             master_sku = str(row['마스터 SKU'])
-    #                             transaction_type = str(row['입출고_여부'])
-    #                             quantity = int(row['수량'])
-                                
-    #                             # Validate transaction type
-    #                             if transaction_type not in ['입고', '출고']:
-    #                                 errors.append(f"잘못된 입출고 유형: {transaction_type} (SKU: {master_sku})")
-    #                                 error_count += 1
-    #                                 continue
-                                
-    #                             # Insert into shipment receipt table
-    #                             ShipmentQueries.insert_shipment_receipt(master_sku, transaction_type, quantity)
-                                
-    #                             success_count += 1
-                                
-    #                         except Exception as e:
-    #                             errors.append(f"오류 발생 (SKU: {row.get('마스터 SKU', 'Unknown')}): {str(e)}")
-    #                             error_count += 1
-                        
-    #                     # Show results
-    #                     if success_count > 0:
-    #                         st.success(f"✅ {success_count}개 항목이 성공적으로 처리되었습니다.")
-                        
-    #                     if error_count > 0:
-    #                         st.error(f"❌ {error_count}개 항목 처리 중 오류가 발생했습니다.")
-    #                         for error in errors:
-    #                             st.warning(error)
-                                
-    #                 except Exception as e:
-    #                     st.error(f"처리 중 오류 발생: {str(e)}")
-    #         with col2:
-    #             if st.button("❌ 취소", use_container_width=True):
-    #                 st.info("업로드가 취소되었습니다.")
 
 # Product Management page
 def show_product_management():
@@ -832,10 +595,6 @@ def show_product_management():
                         if products_df.iloc[idx]['소비기한'] != edited_df.iloc[idx]['소비기한']:
                             updates['소비기한'] = edited_df.iloc[idx]['소비기한']
                             row_changed = True
-                        
-                        # if products_df.iloc[idx]['제조사'] != edited_df.iloc[idx]['제조사']:
-                        #     updates['제조사'] = edited_df.iloc[idx]['제조사']
-                        #     row_changed = True
                         
                         # If changes were made to this row, update the database
                         if row_changed:
@@ -1264,12 +1023,6 @@ def show_prediction():
         selected_sku = sku_mapping.get(product, None)
 
         current_date = datetime.now()
-
-        # prediction_months = []
-        # for i in range(1, 4):  # Next 3 months
-        #     future_date = current_date + relativedelta(months=i)
-        #     month_name = f"{future_date.month}월"
-        #     prediction_months.append(month_name)
         
         # Always show 3 months prediction
         st.info("향후 3개월에 대한 예측을 표시합니다.")  # st.info(f"향후 3개월({prediction_months[0]}, {prediction_months[1]}, {prediction_months[2]}) 예측을 표시합니다.")
@@ -1642,32 +1395,6 @@ def show_prediction():
             else:
                 st.metric("권장 안전재고", "3,500개")
                 st.metric("현재 설정값", "3,000개", "-500개")
-    
-    # with tabs[1]:
-    #     st.subheader("예측 모델 설정")
-        
-    #     model = st.selectbox(
-    #         "예측 모델 선택",
-    #         ["Prophet (권장)", "ARIMA", "LSTM"]
-    #     )
-        
-    #     st.info(f"현재 선택된 모델: {model}")
-        
-    #     # Model parameters
-    #     if model == "Prophet (권장)":
-    #         seasonality = st.checkbox("계절성 고려", value=True)
-    #         holidays = st.checkbox("휴일 효과 고려", value=True)
-    #     elif model == "ARIMA":
-    #         p = st.slider("p (자기회귀)", 0, 5, 1)
-    #         d = st.slider("d (차분)", 0, 2, 1)
-    #         q = st.slider("q (이동평균)", 0, 5, 1)
-        
-    #     if st.button("모델 재학습"):
-    #         with st.spinner("모델을 재학습하고 있습니다..."):
-    #             # Simulate training
-    #             import time
-    #             time.sleep(2)
-    #         st.success("모델 재학습이 완료되었습니다.")
     
     with tabs[1]:
         st.subheader("예측값 수동 조정")
@@ -2766,27 +2493,6 @@ def show_alerts():
                 # 'phone': phone if sms_notify else None
             }
             st.success("알림 설정이 저장되었습니다.")
-    
-    # with tabs[2]:
-    #     st.subheader("알림 이력")
-        
-    #     # Date range filter
-    #     col1, col2 = st.columns(2)
-    #     with col1:
-    #         start_date = st.date_input("시작일", value=datetime.now().date())
-    #     with col2:
-    #         end_date = st.date_input("종료일", value=datetime.now().date())
-        
-    #     # Alert history
-    #     history_data = pd.DataFrame({
-    #         '일시': pd.date_range(end=datetime.now(), periods=10, freq='6H'),
-    #         '유형': ['재고 부족'] * 5 + ['발주 시점'] * 5,
-    #         '제품': ['비타민C', '오메가3', '프로바이오틱스'] * 3 + ['비타민D'],
-    #         '상태': ['처리완료', '미처리', '처리완료'] * 3 + ['미처리'],
-    #         '처리자': ['biocom', '-', 'biocom'] * 3 + ['-']
-    #     })
-        
-    #     st.dataframe(history_data, use_container_width=True, hide_index=True)
 
 # Member info page
 def member_info():
