@@ -2,7 +2,6 @@ import schedule
 import time
 import threading
 from datetime import datetime, timedelta
-import pandas as pd
 from config.database import ProductQueries, db
 from utils.email_alerts import EmailAlertSystem
 import os
