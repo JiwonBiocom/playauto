@@ -200,13 +200,13 @@ class ProductQueries:
         return None
     
     @staticmethod
-    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
+    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, current_stock: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
         query = """
         INSERT INTO playauto_product_inventory 
-        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 현재재고, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, current_stock, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
     
     @staticmethod
     def update_product(master_sku: str, **kwargs):
