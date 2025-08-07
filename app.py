@@ -939,12 +939,13 @@ def show_product_management():
         
         with st.form("new_product_form"):
             master_sku = st.text_input("마스터 SKU*")
+            product_name = st.text_input("상품명*")
 
             col1, col2 = st.columns(2)
             with col1:
-                product_name = st.text_input("상품명*")
                 category = st.selectbox("카테고리", ["영양제", "건강식품"])
                 is_set = st.selectbox("세트유무", ['단품', '세트'])
+                current_stock = st.number_input("현재재고", min_value=0, value=100)
             
             with col2:
                 lead_time = st.number_input("리드타임(일)", min_value=1, value=30)
@@ -967,6 +968,7 @@ def show_product_management():
                             product_name=product_name,
                             category=category,
                             is_set=is_set,
+                            current_stock=current_stock,
                             lead_time=lead_time,
                             moq=moq,
                             safety_stock=safety_stock,
@@ -1199,7 +1201,7 @@ def show_inventory():
         
         # Get current stock for selected product
         if product in products_dict:
-            current_stock = products_dict[product]['current_stock']
+            current_stock = products_dict[product]['current_stock'] if products_dict[product]['current_stock'] is not None else 0
             master_sku = products_dict[product]['master_sku']
         
         col1, col2 = st.columns(2)
