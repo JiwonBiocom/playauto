@@ -80,9 +80,7 @@ class MemberQueries:
     @staticmethod
     def get_all_members():
         query = """
-        SELECT 
-            id, name, master, email, phone_no 
-        FROM playauto_members
+        SELECT * FROM playauto_members
         ORDER BY last_update_time
         """
         return db.execute_query(query)
@@ -307,7 +305,14 @@ class ShipmentQueries:
     @staticmethod
     def get_all_shipment_receipts():
         """Get all shipment receipts ordered by time"""
-        query = """SELECT * FROM playauto_shipment_receipt ORDER BY 시점 DESC"""
+        # query = """SELECT * FROM playauto_shipment_receipt ORDER BY 시점 DESC"""
+        query = """
+        SELECT 
+            마스터_SKU, 수량, 시점 
+        FROM playauto_shipment_receipt 
+        WHERE 입출고_여부='출고' 
+        ORDER BY 마스터_SKU, 시점
+        """
         return db.execute_query(query)
     
     @staticmethod
@@ -513,3 +518,4 @@ class PredictionQueries:
         ORDER BY 마스터_sku, edited_at DESC
         """
         return db.execute_query(query, (master_sku,))
+
