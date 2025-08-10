@@ -1052,7 +1052,11 @@ def show_product_management():
 
             col1, col2 = st.columns(2)
             with col1:
-                category = st.selectbox("카테고리", ["영양제", "건강식품", "검사권"])
+                category = st.selectbox("카테고리", [
+                    "영양제", "건강식품", 
+                    "검사권-중금속", "검사권-알러지", "검사권-장내세균", "검사권-호르몬"
+                    "검사권-스트레스", "검사권-대사기능", "검사권-펫", "검사권-공통"
+                ])
                 is_set = st.selectbox("세트유무", ['단품', '세트'])
                 current_stock = st.number_input("현재재고", min_value=0, value=100)
             
