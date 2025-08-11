@@ -1025,6 +1025,8 @@ def show_product_management():
                 st.error(f"업데이트 중 오류 발생: {str(e)}")
     
     with tabs[1]:
+        st.subheader("신규 제품 등록 - 단품")
+        
         # Show success message if exists in session state
         if 'product_success_message' in st.session_state:
             st.success(st.session_state.product_success_message)
@@ -1048,12 +1050,10 @@ def show_product_management():
             master_sku = st.text_input("마스터 SKU*")
             product_name = st.text_input("상품명*")
             category = st.selectbox("카테고리", [
-                "영양제", "건강식품", 
-                "검사권-중금속", "검사권-알러지", "검사권-장내세균", "검사권-호르몬"
-                "검사권-스트레스", "검사권-대사기능", "검사권-펫", "검사권-공통"
+                "영양제", "건강식품"
             ])
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 current_stock = st.number_input("현재재고", min_value=0, value=100)
                 safety_stock = st.number_input("안전재고", min_value=0, value=100)
@@ -1062,11 +1062,6 @@ def show_product_management():
                 lead_time = st.number_input("리드타임(일)", min_value=1, value=30)
                 moq = st.number_input("최소주문수량(MOQ)", min_value=1, value=100)
             
-            with col3:
-                is_set = st.selectbox("세트유무", ['단품', '세트'])
-                multiple = st.number_input("출고 배수", min_value=0, value=5,
-                                          help="단품의 경우 0, 세트의 경우 1 이상 입력하세요")
-            
             supplier = st.selectbox("공급업체", ["NPK", "다빈치랩", "바이오땡", "기타"])
             expiration = st.date_input("소비기한")  # , value=datetime.now().date()
 
@@ -1074,14 +1069,7 @@ def show_product_management():
                 # Validate required fields
                 if not master_sku or not product_name:
                     st.error("필수 필드를 모두 입력해주세요.")
-                # Validate multiple value based on is_set
-                elif is_set == '세트' and multiple <= 0:
-                    st.error("세트 상품의 경우 출고 배수는 0보다 커야 합니다.")
                 else:
-                    # Automatically set multiple to 0 for 단품
-                    if is_set == '단품':
-                        multiple = 0
-                    
                     try:
                         # Execute the insert using the ProductQueries class
                         rows_affected = ProductQueries.insert_product(
@@ -1089,7 +1077,87 @@ def show_product_management():
                             playauto_sku=next_sku,
                             product_name=product_name,
                             category=category,
-                            is_set=is_set,
+                            sub_category='',  # 단품은 구분 없음
+                            is_set='단품',
+                            multiple=0,  # 단품은 항상 0
+                            current_stock=current_stock,
+                            lead_time=lead_time,
+                            moq=moq,
+                            safety_stock=safety_stock,
+                            supplier=supplier,
+                            expiration=expiration,
+                            user_id=st.session_state.user_info['id'] if 'user_info' in st.session_state else '', 
+                            user_name=st.session_state.user_info['name'] if 'user_info' in st.session_state else ''
+                        )
+                        
+                        if rows_affected > 0:
+                            # Store success message in session state
+                            st.session_state.product_success_message = f"단품 제품 '{product_name}'이(가) 플레이오토 SKU '{next_sku}'로 성공적으로 등록되었습니다."
+                            st.rerun()  # Refresh the page to show the new product
+                        else:
+                            st.error("제품 등록에 실패했습니다.")
+                    except Exception as e:
+                        st.error(f"데이터베이스 오류: {str(e)}")
+
+        st.markdown("---")
+        
+        st.subheader("신규 제품 등록 - 세트")
+        
+        # Get the latest playauto SKU and generate the next one
+        latest_sku = ProductQueries.get_latest_playauto_sku()
+        if latest_sku and latest_sku.startswith('PA-'):
+            try:
+                # Extract the number part and increment
+                sku_number = int(latest_sku.split('-')[1])
+                next_sku = f"PA-{sku_number + 1:03d}"
+            except:
+                next_sku = "PA-001"
+        else:
+            next_sku = "PA-001"
+        
+        # Display the auto-generated SKU
+        
+        with st.form("new_product_form_set"):
+            master_sku = st.text_input("마스터 SKU*")
+            product_name = st.text_input("상품명*")
+            category = st.selectbox("카테고리", [
+                "영양제", "건강식품", "검사권"
+            ])
+            sub_category = st.selectbox("구분", [
+                "중금속", "알러지", "장내세균", "호르몬", 
+                "스트레스", "대사기능", "펫", "공통", 
+            ])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                current_stock = st.number_input("현재재고", min_value=0, value=100)
+                safety_stock = st.number_input("안전재고", min_value=0, value=100)
+            
+            with col2:
+                lead_time = st.number_input("리드타임(일)", min_value=1, value=30)
+                moq = st.number_input("최소주문수량(MOQ)", min_value=1, value=100)
+            
+            multiple = st.number_input("출고 배수", min_value=1, value=3, help="세트 상품의 출고 배수를 입력하세요 (1 이상)")
+            supplier = st.selectbox("공급업체", ["NPK", "다빈치랩", "바이오땡", "기타"])
+            expiration = st.date_input("소비기한")  # , value=datetime.now().date()
+
+            if st.form_submit_button("제품 등록"):
+                # Validate required fields
+                if not master_sku or not product_name:
+                    st.error("필수 필드를 모두 입력해주세요.")
+                # Validate multiple for set products
+                elif multiple <= 0:
+                    st.error("세트 상품의 출고 배수는 1 이상이어야 합니다.")
+                else:
+                    try:
+                        # Execute the insert using the ProductQueries class
+                        rows_affected = ProductQueries.insert_product(
+                            master_sku=master_sku,
+                            playauto_sku=next_sku,
+                            product_name=product_name,
+                            category=category,
+                            sub_category=sub_category,  # 세트 상품은 구분 있음
+                            is_set='세트',
                             multiple=multiple,
                             current_stock=current_stock,
                             lead_time=lead_time,
@@ -1103,7 +1171,7 @@ def show_product_management():
                         
                         if rows_affected > 0:
                             # Store success message in session state
-                            st.session_state.product_success_message = f"제품 '{product_name}'이(가) 플레이오토 SKU '{next_sku}'로 성공적으로 등록되었습니다."
+                            st.session_state.product_success_message = f"세트 제품 '{product_name}'이(가) 플레이오토 SKU '{next_sku}'로 성공적으로 등록되었습니다. (출고 배수: {multiple})"
                             st.rerun()  # Refresh the page to show the new product
                         else:
                             st.error("제품 등록에 실패했습니다.")
