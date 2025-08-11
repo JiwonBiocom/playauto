@@ -1025,8 +1025,6 @@ def show_product_management():
                 st.error(f"업데이트 중 오류 발생: {str(e)}")
     
     with tabs[1]:
-        st.subheader("신규 제품 등록")
-        
         # Show success message if exists in session state
         if 'product_success_message' in st.session_state:
             st.success(st.session_state.product_success_message)
@@ -1049,21 +1047,25 @@ def show_product_management():
         with st.form("new_product_form"):
             master_sku = st.text_input("마스터 SKU*")
             product_name = st.text_input("상품명*")
+            category = st.selectbox("카테고리", [
+                "영양제", "건강식품", 
+                "검사권-중금속", "검사권-알러지", "검사권-장내세균", "검사권-호르몬"
+                "검사권-스트레스", "검사권-대사기능", "검사권-펫", "검사권-공통"
+            ])
 
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                category = st.selectbox("카테고리", [
-                    "영양제", "건강식품", 
-                    "검사권-중금속", "검사권-알러지", "검사권-장내세균", "검사권-호르몬"
-                    "검사권-스트레스", "검사권-대사기능", "검사권-펫", "검사권-공통"
-                ])
-                is_set = st.selectbox("세트유무", ['단품', '세트'])
                 current_stock = st.number_input("현재재고", min_value=0, value=100)
+                safety_stock = st.number_input("안전재고", min_value=0, value=100)
             
             with col2:
                 lead_time = st.number_input("리드타임(일)", min_value=1, value=30)
                 moq = st.number_input("최소주문수량(MOQ)", min_value=1, value=100)
-                safety_stock = st.number_input("안전재고", min_value=0, value=100)
+            
+            with col3:
+                is_set = st.selectbox("세트유무", ['단품', '세트'])
+                multiple = st.number_input("출고 배수", min_value=0, value=5,
+                                          help="단품의 경우 0, 세트의 경우 1 이상 입력하세요")
             
             supplier = st.selectbox("공급업체", ["NPK", "다빈치랩", "바이오땡", "기타"])
             expiration = st.date_input("소비기한")  # , value=datetime.now().date()
@@ -1072,7 +1074,14 @@ def show_product_management():
                 # Validate required fields
                 if not master_sku or not product_name:
                     st.error("필수 필드를 모두 입력해주세요.")
+                # Validate multiple value based on is_set
+                elif is_set == '세트' and multiple <= 0:
+                    st.error("세트 상품의 경우 출고 배수는 0보다 커야 합니다.")
                 else:
+                    # Automatically set multiple to 0 for 단품
+                    if is_set == '단품':
+                        multiple = 0
+                    
                     try:
                         # Execute the insert using the ProductQueries class
                         rows_affected = ProductQueries.insert_product(
@@ -1081,6 +1090,7 @@ def show_product_management():
                             product_name=product_name,
                             category=category,
                             is_set=is_set,
+                            multiple=multiple,
                             current_stock=current_stock,
                             lead_time=lead_time,
                             moq=moq,
@@ -1107,24 +1117,30 @@ def show_inventory():
     tabs = st.tabs(["입출고 조정", "재고 조정"])
     
     with tabs[0]:
-        st.subheader("재고 관리 템플릿 다운로드")
-        st.info("상품별 입출고 수량을 수정할 수 있는 페이지입니다. 엑셀 템플릿을 다운로드하여 상품별로 입고 출고 수량만 입력해서 업로드해주세요.")
-        st.info("입력하신 출입고 양만큼 현재 재고 값이 변동됩니다.")
+        st.subheader("입출고 조정하기")
+        st.info("상품별 입출고 수량을 조정할 수 있는 페이지입니다. 아래 표에서 직접 편집하거나, 엑셀 파일을 업로드하여 일괄 처리할 수 있습니다.")
+        st.warning("⚠️ 입력하신 입출고 양만큼 현재 재고 값이 변동됩니다.")
+        
+        # Section for direct editing
+        st.subheader("✏️ 직접 편집")
+        st.caption("아래 표에서 입고량과 출고량을 직접 입력한 후 저장 버튼을 클릭하세요.")
+        st.info("📌 세트 상품의 경우: 출고량에 배수가 자동으로 적용됩니다. 예) 배수가 3인 세트 상품에 출고량 2를 입력하면 실제로 6개가 출고됩니다.")
         
         # Load product data from database for template
         try:
             products_data = ProductQueries.get_all_products()
             if products_data:
-                df = pd.DataFrame(products_data)
+                products_df = pd.DataFrame(products_data)
                 inventory_df = pd.DataFrame({
-                    '마스터 SKU': df['마스터_sku'],
-                    '플레이오토 SKU': df['플레이오토_sku'],
-                    '상품명': df['상품명'],
-                    '카테고리': df['카테고리'],
-                    '세트 유무': df['세트유무'],
-                    '현재 재고': df['현재재고'],
-                    '입고량': [0] * len(df),
-                    '출고량': [0] * len(df)
+                    '마스터 SKU': products_df['마스터_sku'],
+                    '플레이오토 SKU': products_df['플레이오토_sku'],
+                    '상품명': products_df['상품명'],
+                    '카테고리': products_df['카테고리'],
+                    '세트 유무': products_df['세트유무'],
+                    '배수': products_df['배수'],
+                    '현재 재고': products_df['현재재고'],
+                    '입고량': [0] * len(products_df),
+                    '출고량': [0] * len(products_df)
                 })
             else:
                 # 샘플
@@ -1151,8 +1167,100 @@ def show_inventory():
                 '출고량': [0, 0, 0]
             })
         
-        st.dataframe(inventory_df, hide_index=True, use_container_width=True)
+        # st.dataframe(inventory_df, hide_index=True, use_container_width=True)
+        edited_df = st.data_editor(
+            inventory_df,
+            use_container_width=True,
+            num_rows="fixed",
+            key="inventory_editor",
+            disabled=['마스터 SKU', '플레이오토 SKU', '상품명', '카테고리', '세트 유무', '배수', '현재 재고']
+        )
 
+        # 입출고 날짜 입력
+        invinout_date = st.date_input("입출고 시점")
+
+        if st.button("입출고량 수정사항 저장", type="primary"):
+            try:
+                if len(inventory_df) == len(edited_df):
+                    changes_made = False
+                    errors = []
+                    success_count = 0
+                    
+                    for idx in range(len(inventory_df)):
+                        # Get the master SKU (primary key)
+                        master_sku = inventory_df.iloc[idx]['마스터 SKU']
+                        is_set = inventory_df.iloc[idx]['세트 유무']
+                        multiple = int(inventory_df.iloc[idx]['배수']) if pd.notna(inventory_df.iloc[idx]['배수']) else 0
+                        
+                        # Check if inventory changes were made
+                        incoming_qty = int(edited_df.iloc[idx]['입고량'])
+                        outgoing_qty = int(edited_df.iloc[idx]['출고량'])
+                        
+                        # Process incoming inventory if > 0
+                        if incoming_qty > 0:
+                            try:
+                                result = ProductQueries.process_inventory_in(master_sku, incoming_qty)
+                                if result > 0:
+                                    # Record in shipment receipt table
+                                    if 'user_info' in st.session_state:
+                                        ShipmentQueries.insert_shipment_receipt(
+                                            master_sku, '입고', incoming_qty, 
+                                            st.session_state.user_info['name'], 
+                                            st.session_state.user_info['id']
+                                        )
+                                    changes_made = True
+                                    success_count += 1
+                            except Exception as e:
+                                errors.append(f"입고 처리 실패 - {master_sku}: {str(e)}")
+                        
+                        # Process outgoing inventory if > 0
+                        if outgoing_qty > 0:
+                            try:
+                                # Apply multiple for 세트 products
+                                actual_outgoing_qty = outgoing_qty
+                                if is_set == '세트' and multiple > 0:
+                                    actual_outgoing_qty = outgoing_qty * multiple
+                                    
+                                result = ProductQueries.process_inventory_out(master_sku, actual_outgoing_qty)
+                                if result == 0:
+                                    if is_set == '세트' and multiple > 0:
+                                        errors.append(f"재고 부족 - {master_sku}: 세트 상품 출고량 {outgoing_qty} x 배수 {multiple} = {actual_outgoing_qty}개가 현재 재고보다 많습니다.")
+                                    else:
+                                        errors.append(f"재고 부족 - {master_sku}: 현재 재고보다 출고량이 많습니다.")
+                                else:
+                                    # Record in shipment receipt table with actual quantity
+                                    if 'user_info' in st.session_state:
+                                        ShipmentQueries.insert_shipment_receipt(
+                                            master_sku, '출고', actual_outgoing_qty,
+                                            st.session_state.user_info['name'],
+                                            st.session_state.user_info['id']
+                                        )
+                                    changes_made = True
+                                    success_count += 1
+                            except Exception as e:
+                                errors.append(f"출고 처리 실패 - {master_sku}: {str(e)}")
+                    
+                    # Show results
+                    if changes_made:
+                        st.success(f"✅ {success_count}개 항목의 입출고가 성공적으로 처리되었습니다.")
+                        st.rerun()
+                    else:
+                        st.info("변경된 입출고 수량이 없습니다.")
+                    
+                    if errors:
+                        for error in errors:
+                            st.error(error)
+                            
+            except Exception as e:
+                st.error(f"업데이트 중 오류 발생: {str(e)}")
+
+        # Add divider between direct edit and file upload sections
+        st.divider()
+        
+        # Excel file upload section
+        st.subheader("📤 엑셀 파일로 일괄 업로드")
+        st.info("여러 제품의 입출고를 한번에 처리하려면 엑셀 템플릿을 다운로드하여 수정 후 업로드하세요.")
+        
         # 엑셀로 변환
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -1165,9 +1273,6 @@ def show_inventory():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        
-
-        st.subheader("재고 데이터 업로드")
         
         uploaded_file = st.file_uploader(
             "재고 파일 업로드 (CSV, Excel)",
@@ -1226,6 +1331,8 @@ def show_inventory():
                                         master_sku = str(row['마스터 SKU'])
                                         incoming_qty = int(row.get('입고량', 0))
                                         outgoing_qty = int(row.get('출고량', 0))
+                                        is_set = row.get('세트 유무', '단품')
+                                        multiple = int(row.get('배수', 0)) if pd.notna(row.get('배수', 0)) else 0
                                         
                                         # Process incoming inventory if exists
                                         if incoming_qty > 0:
@@ -1236,14 +1343,22 @@ def show_inventory():
                                         
                                         # Process outgoing inventory if exists
                                         if outgoing_qty > 0:
-                                            result = ProductQueries.process_inventory_out(master_sku, outgoing_qty)
+                                            # Apply multiple for 세트 products
+                                            actual_outgoing_qty = outgoing_qty
+                                            if is_set == '세트' and multiple > 0:
+                                                actual_outgoing_qty = outgoing_qty * multiple
+                                                
+                                            result = ProductQueries.process_inventory_out(master_sku, actual_outgoing_qty)
                                             if result == 0:
-                                                errors.append(f"재고 부족: {master_sku} (요청 수량: {outgoing_qty})")
+                                                if is_set == '세트' and multiple > 0:
+                                                    errors.append(f"재고 부족: {master_sku} - 세트 상품 출고량 {outgoing_qty} x 배수 {multiple} = {actual_outgoing_qty}개가 현재 재고보다 많습니다.")
+                                                else:
+                                                    errors.append(f"재고 부족: {master_sku} (요청 수량: {actual_outgoing_qty})")
                                                 error_count += 1
                                                 continue
                                             else:
-                                                # Record in shipment receipt table
-                                                ShipmentQueries.insert_shipment_receipt(master_sku, '출고', outgoing_qty, st.session_state.user_info['name'], st.session_state.user_id)
+                                                # Record in shipment receipt table with actual quantity
+                                                ShipmentQueries.insert_shipment_receipt(master_sku, '출고', actual_outgoing_qty, st.session_state.user_info['name'], st.session_state.user_id)
                                         
                                         if incoming_qty > 0 or outgoing_qty > 0:
                                             success_count += 1
