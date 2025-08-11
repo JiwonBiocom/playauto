@@ -81,7 +81,7 @@ class MemberQueries:
     def get_all_members():
         query = """
         SELECT * FROM playauto_members
-        ORDER BY last_update_time
+        ORDER BY joined_date DESC, last_update_time DESC
         """
         return db.execute_query(query)
     
@@ -89,15 +89,15 @@ class MemberQueries:
     def insert_member(id: str, password: str, name: str, master: str, email: str, phone_no: str):
         query = """
         INSERT INTO playauto_members 
-        (id, password, name, master, email, phone_no) 
-        VALUES (%s, %s, %s, %s, %s, %s)
+        (id, password, name, master, email, phone_no, joined_date) 
+        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
         """
         return db.execute_update(query, (id, password, name, master, email, phone_no))
     
     @staticmethod
     def verify_login(id: str, password: str):
         query = """
-        SELECT id, name, master, email, phone_no 
+        SELECT id, name, master, email, phone_no, joined_date 
         FROM playauto_members 
         WHERE id = %s AND password = %s
         """
@@ -107,7 +107,7 @@ class MemberQueries:
     @staticmethod
     def get_member_by_id(id: str):
         query = """
-        SELECT id, name, master, email, phone_no 
+        SELECT id, name, master, email, phone_no, joined_date 
         FROM playauto_members 
         WHERE id = %s
         """
@@ -150,7 +150,7 @@ class ProductQueries:
         query = """
         SELECT 
             마스터_sku, 플레이오토_sku,
-            상품명, 카테고리, 세트유무,
+            상품명, 카테고리, 세트유무, 배수, 
             출고량, 입고량, 현재재고, 
             리드타임, 최소주문수량, 안전재고, 
             제조사, 소비기한
@@ -198,13 +198,13 @@ class ProductQueries:
         return None
     
     @staticmethod
-    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, current_stock: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
+    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, multiple: int, current_stock: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
         query = """
         INSERT INTO playauto_product_inventory 
-        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 현재재고, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 배수, 현재재고, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, current_stock, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, multiple, current_stock, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
     
     @staticmethod
     def update_product(master_sku: str, **kwargs):
@@ -518,4 +518,3 @@ class PredictionQueries:
         ORDER BY 마스터_sku, edited_at DESC
         """
         return db.execute_query(query, (master_sku,))
-
