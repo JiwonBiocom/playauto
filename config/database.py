@@ -6,6 +6,10 @@ from contextlib import contextmanager
 from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 
+import pandas as pd
+from datetime import datetime
+        
+
 # Load environment variables
 load_dotenv()
 
@@ -16,8 +20,8 @@ class DatabaseConnection:
         self.connection_params = {
             'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '5432'),
-            'database': os.getenv('DB_NAME', 'playauto'),
-            'user': os.getenv('DB_USER', 'playautouser'),
+            'database': os.getenv('DB_NAME', 'dify'),
+            'user': os.getenv('DB_USER', 'difyuser'),
             'password': os.getenv('DB_PASSWORD', '')
         }
     
@@ -149,13 +153,16 @@ class ProductQueries:
     def get_all_products():
         query = """
         SELECT 
-            마스터_sku, 플레이오토_sku,
-            상품명, 카테고리, 세트유무, 배수, 
-            출고량, 입고량, 현재재고, 
-            리드타임, 최소주문수량, 안전재고, 
-            제조사, 소비기한
-        FROM playauto_product_inventory
-        ORDER BY 플레이오토_sku
+            pi.마스터_sku, pi.플레이오토_sku,
+            pi.상품명, pi.카테고리, pi.세트유무, 
+            pi.출고량, pi.입고량, pi.현재재고, 
+            pi.리드타임, pi.최소주문수량, pi.안전재고, 
+            pi.제조사, pi.소비기한,
+            COALESCE(pc.multiple, 1) as 배수
+        FROM playauto_product_inventory pi
+        LEFT JOIN playauto_product_category pc 
+            ON pi.마스터_sku = pc.master_SKU
+        ORDER BY pi.플레이오토_sku
         """
         return db.execute_query(query)
     
@@ -198,13 +205,22 @@ class ProductQueries:
         return None
     
     @staticmethod
-    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, multiple: int, current_stock: str, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str, user_name: str):
+    def insert_product(master_sku: str, playauto_sku: str, product_name: str, category: str, is_set: str, current_stock: int, lead_time: int, moq: int, safety_stock: int, supplier: str, expiration, user_id: str):
         query = """
         INSERT INTO playauto_product_inventory 
-        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 배수, 현재재고, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id, 등록한_회원_이름)
+        (마스터_sku, 플레이오토_sku, 상품명, 카테고리, 세트유무, 현재재고, 출고량, 입고량, 리드타임, 최소주문수량, 안전재고, 제조사, 소비기한, 등록한_회원_id)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, multiple, current_stock, lead_time, moq, safety_stock, supplier, expiration, user_id, user_name))
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, category, is_set, current_stock, 0, 0, lead_time, moq, safety_stock, supplier, expiration, user_id))
+    
+    @staticmethod
+    def set_product_info(master_sku: str, playauto_sku: str, product_name: str, is_set: str, multiple: int, category: str, category_mid: str, category_low: str):
+        query = """
+        INSERT INTO playauto_product_category 
+        (master_SKU, playauto_SKU, product_name, is_set, multiple, category, category_mid, category_low) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        return db.execute_update(query, (master_sku, playauto_sku, product_name, is_set, multiple, category, category_mid, category_low))
     
     @staticmethod
     def update_product(master_sku: str, **kwargs):
@@ -300,16 +316,47 @@ class ProductQueries:
         """
         return db.execute_update(query, (master_sku, current_stock, new_stock_level, reason, name, id))
 
+
 # 입출고 테이블
 class ShipmentQueries:
     @staticmethod
-    def get_all_shipment_receipts():
+    def get_all_inv_inout():
+        query = """
+        SELECT 
+            a.inv_code, a.마스터_SKU, b.상품명, b.제조사, a.입출고_여부, a.수량, a.시점, a.작업자_id 
+        FROM playauto_copy_shipment_receipt a 
+        INNER JOIN playauto_product_inventory b 
+        ON a.마스터_SKU = b.마스터_SKU
+        ORDER BY a.마스터_SKU, a.시점
+        """
+        return db.execute_query(query)
+    
+    @staticmethod
+    def insert_edit_request(inv_code, master_sku, product_name, manufacturer, 
+                           inout_type, old_qty, new_qty, old_date, new_date,
+                           requester_name, requester_id, reason):
+        """Insert an edit request for inventory in/out adjustment"""
+        # Accept datetime strings directly (e.g., "2024-10-08 00:00:00")
+        
+        query = """
+        INSERT INTO playauto_inNout_adjust 
+        (inv_code, 마스터_SKU, 상품명, 제조사, 입출고_여부, 
+         수량_old, 수량_new, 시점_old, 시점_new, 
+         요청자명, 요청자_id, 사유, 승인)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '승인대기')
+        """
+        return db.execute_update(query, (inv_code, master_sku, product_name, manufacturer,
+                                        inout_type, int(old_qty), int(new_qty), old_date, new_date,
+                                        requester_name, requester_id, reason))
+
+    @staticmethod
+    def get_all_inv_out():
         """Get all shipment receipts ordered by time"""
         # query = """SELECT * FROM playauto_shipment_receipt ORDER BY 시점 DESC"""
         query = """
         SELECT 
             마스터_SKU, 수량, 시점 
-        FROM playauto_shipment_receipt 
+        FROM playauto_copy_shipment_receipt 
         WHERE 입출고_여부='출고' 
         ORDER BY 마스터_SKU, 시점
         """
@@ -361,14 +408,68 @@ class ShipmentQueries:
         return db.execute_query(query)
     
     @staticmethod
-    def insert_shipment_receipt(master_sku: str, transaction_type: str, quantity: int, name: str, id: str):
-        """Insert a new shipment receipt with Korean timezone"""
-        query = """
-        INSERT INTO playauto_shipment_receipt 
-        (마스터_SKU, 입출고_여부, 수량, 시점, 작업자명, 작업자_id)
-        VALUES (%s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul', %s, %s)
+    def generate_inv_code(master_sku: str, transaction_type: str, transaction_datetime=None):
+        """Generate inv_code for inventory transactions"""
+        from datetime import datetime
+        
+        # Determine the transaction datetime
+        if transaction_datetime:
+            if isinstance(transaction_datetime, str):
+                dt = datetime.strptime(transaction_datetime, '%Y-%m-%d %H:%M:%S')
+            else:
+                dt = transaction_datetime
+        else:
+            # Get current Korean time
+            query = "SELECT CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul' as now"
+            result = db.execute_query(query)
+            dt = result[0]['now']
+        
+        # Format the datetime part
+        dt_str = dt.strftime('%y%m%d%H%M%S')
+        
+        # Convert transaction type to 'in' or 'out'
+        trans_type = 'in' if transaction_type == '입고' else 'out'
+        
+        # Get the count of existing transactions for this second
+        count_query = """
+        SELECT COUNT(*) + 1 as next_num
+        FROM playauto_copy_shipment_receipt
+        WHERE 마스터_SKU = %s 
+        AND 입출고_여부 = %s
+        AND DATE_TRUNC('second', 시점) = DATE_TRUNC('second', %s::timestamp)
         """
-        return db.execute_update(query, (master_sku, transaction_type, quantity, name, id))
+        
+        result = db.execute_query(count_query, (master_sku, transaction_type, dt))
+        next_num = result[0]['next_num'] if result else 1
+        
+        # Generate the inv_code
+        inv_code = f"{master_sku}-{trans_type}-{dt_str}-{str(next_num).zfill(3)}"
+        
+        return inv_code
+    
+    @staticmethod
+    def insert_shipment_receipt(master_sku: str, transaction_type: str, quantity: int, id: str, inv_code: str = None, transaction_datetime=None):
+        """Insert a new shipment receipt with optional custom datetime"""
+        # Generate inv_code if not provided
+        if not inv_code:
+            inv_code = ShipmentQueries.generate_inv_code(master_sku, transaction_type, transaction_datetime)
+        
+        if transaction_datetime:
+            # Use provided datetime
+            query = """
+            INSERT INTO playauto_copy_shipment_receipt 
+            (마스터_SKU, 입출고_여부, 수량, 시점, 작업자_id, inv_code)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            return db.execute_update(query, (master_sku, transaction_type, quantity, transaction_datetime, id, inv_code))
+        else:
+            # Use current timestamp with Korean timezone
+            query = """
+            INSERT INTO playauto_copy_shipment_receipt 
+            (마스터_SKU, 입출고_여부, 수량, 시점, 작업자_id, inv_code)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul', %s, %s)
+            """
+            return db.execute_update(query, (master_sku, transaction_type, quantity, id, inv_code))
     
     @staticmethod
     def get_total_monthly_shipments():
@@ -377,12 +478,17 @@ class ShipmentQueries:
         SELECT 
             TO_CHAR(시점, 'YYYY-MM') as month,
             SUM(수량) as total_shipment
-        FROM playauto_shipment_receipt
+        FROM playauto_copy_shipment_receipt
         WHERE 입출고_여부 = '출고'
             AND 시점 >= CURRENT_DATE - INTERVAL '6 months'
         GROUP BY TO_CHAR(시점, 'YYYY-MM')
         ORDER BY month
         """
+        return db.execute_query(query)
+
+    @staticmethod
+    def get_all_inv_adjust():
+        query = """select * from playauto_inNout_adjust"""
         return db.execute_query(query)
 
 
@@ -438,6 +544,7 @@ class InventoryQueries:
         ORDER BY sale_date
         """
         return db.execute_query(query, (product_id, days))
+
 
 # Prediction queries
 class PredictionQueries:
