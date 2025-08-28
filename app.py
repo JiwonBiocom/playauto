@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import io
 import pickle
 import numpy as np
+import secrets
+import hashlib
 import plotly.graph_objects as go
 
 import time
@@ -13,7 +15,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 # Import database connection and queries
-from config.database import db, MemberQueries, ProductQueries, ShipmentQueries, PredictionQueries
+from config.database import db, MemberQueries, ProductQueries, ShipmentQueries, PredictionQueries, ApiKeyQueries
 from utils.calculations import get_inventory_status, calculate_stockout_date
 from utils.email_alerts import EmailAlertSystem
 from utils.notification_scheduler import NotificationScheduler
@@ -612,7 +614,6 @@ def show_shipment_quantity():
     except Exception as e:
         st.error(f"데이터 로드 중 오류 발생: {str(e)}")
         st.info("데이터베이스 연결을 확인하거나 테이블 구조를 확인해주세요.")
-
 
 # Product Management page
 def show_product_management():
@@ -1970,23 +1971,6 @@ def show_prediction():
                     with col1:
                         st.metric("총 예측 값", f"{int(total_forecast):,}개", f"월평균 {int(total_forecast / 4):,}개", help="이번달 + 다음 3개월 예측값")
                     with col2:
-                        # if mape is not None:
-                        #     # Calculate performance rating based on MAPE
-                        #     if mape < 30:
-                        #         performance = "훌륭 👍"
-                        #     elif mape < 50:
-                        #         performance = "양호 🙂"
-                        #     elif mape < 75:
-                        #         performance = "보통 😐"
-                        #     else:
-                        #         performance = "개선필요 ⚠️"
-                        #     
-                        #     # Display MAPE as primary metric with RMSE as secondary
-                        #     st.metric("모델 정확도", 
-                        #              f"MAPE: {mape:.1f}%",
-                        #              f"RMSE: {rmse:.1f}" if rmse is not None else None
-                        #     )
-                        #     st.caption(f"성능: {performance}")
                         if mae is not None and rmse is not None:
                             # Get historical average for context
                             historical_avg = None
@@ -2069,9 +2053,6 @@ def show_prediction():
                                 data_points = predictions['category_info'].get('data_points', 'N/A')
                                 st.caption(f"학습 데이터: {data_points}개월")
                     
-                    # with col3:
-                    #     st.metric("권장 발주량", f"{recommended_order:,}개", help="예측 출고량 + 안전재고, MOQ 고려")
-                    
                     # Get current date first
                     current_date = datetime.now()
                     current_year = current_date.year
@@ -2119,7 +2100,6 @@ def show_prediction():
                                 current_month_actual = current_month_data['수량'].sum() if not current_month_data.empty else 0
                     except Exception as e:
                         st.warning(f"과거 데이터 로드 중 오류: {str(e)}")
-                    
                     
                     # Create date range for predictions (current month + next 3 months)
                     if 'forecast_months' in predictions:
@@ -2615,6 +2595,18 @@ def show_prediction():
             
             # Show predictions for each month in columns
             col2, col3, col4 = st.columns(3)  # col1, col2, col3, col4 = st.columns(4)
+            
+            # with col1:
+            #     st.markdown("**현재 (8월)**")  # st.markdown(f"**1개월 후 ({prediction_months[0]})**")
+            #     st.info(f"AI 예측: {pred_current:,}개")
+            #     # Use existing adjustment if available, otherwise use AI prediction
+            #     default_current = int(existing_adjustment['adjusted_current']) if existing_adjustment else pred_current
+            #     adjusted_current = st.number_input(
+            #         "조정값 (8월)",  # f"조정값 ({prediction_months[0]})",
+            #         min_value=0,
+            #         value=default_current if default_current > 0 else 100,
+            #         key="adj_1month"
+            #     )
             
             with col2:
                 st.markdown("**1개월 후 (9월)**")  # st.markdown(f"**2개월 후 ({prediction_months[1]})**")
@@ -3347,13 +3339,6 @@ def show_alerts():
             help="소비기한이 N일 남으면 알림"
         )
         
-        # st.markdown("**과잉 재고 알림**")
-        # overstock_ratio = st.slider(
-        #     "과잉 재고 비율 (%)",
-        #     100, 500, 200,
-        #     help="안전재고 대비 N% 이상이면 알림"
-        # )
-        
         # Notification channels
         st.markdown("**알림 채널**")
         email = None
@@ -3762,7 +3747,7 @@ def show_member_management():
             st.rerun()
         return
     
-    tabs = st.tabs(["회원 정보 수정", "입출고 수정 요청"])  # , "신규 회원 등록"
+    tabs = st.tabs(["회원 정보 수정", "입출고 수정 요청", "API 키 관리"])  # , "신규 회원 등록"
     
     with tabs[0]:
         st.subheader("회원 정보 수정")
@@ -3875,6 +3860,158 @@ def show_member_management():
             ]
             
             st.dataframe(inout_df)
+    
+    with tabs[2]:
+        st.subheader("API 키 관리")
+        st.markdown("외부 시스템에서 재고 API에 접근할 수 있는 보안 키를 생성하고 관리합니다.")
+        
+        # Create sub-tabs for API key management
+        api_tabs = st.tabs(["새 API 키 생성", "기존 API 키 관리"])
+        
+        with api_tabs[0]:
+            st.info("API 키는 외부 시스템에서 재고 조회 및 입출고 처리를 위해 사용됩니다.")
+            
+            with st.form("generate_api_key"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    key_name = st.text_input(
+                        "API 키 이름", 
+                        placeholder="예: 프로덕션 서버, 모바일 앱",
+                        help="이 API 키를 식별할 수 있는 이름"
+                    )
+                    
+                with col2:
+                    permissions = st.multiselect(
+                        "권한",
+                        options=["read", "write"],
+                        default=["read", "write"],
+                        help="이 키가 수행할 수 있는 작업 선택"
+                    )
+                
+                generate_btn = st.form_submit_button("🔑 API 키 생성", type="primary")
+                
+                if generate_btn and key_name:
+                    # Generate a secure API key
+                    api_key = secrets.token_urlsafe(32)
+                    
+                    # Hash the key for storage
+                    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+                    
+                    # Save to database
+                    try:
+                        result = ApiKeyQueries.create_api_key(
+                            key_hash=key_hash,
+                            name=key_name,
+                            created_by=st.session_state.user_id,
+                            permissions=",".join(permissions)
+                        )
+                        
+                        # Display the generated key
+                        st.success("✅ API 키가 성공적으로 생성되었습니다!")
+                        
+                        # Important warning
+                        st.warning("⚠️ **중요**: 이 API 키를 안전하게 보관하세요. 다시 표시되지 않습니다!")
+                        
+                        # Display the key
+                        st.code(api_key, language=None)
+                        
+                        # Show usage instructions
+                        with st.expander("API 키 사용 방법"):
+                            st.markdown("""
+                            ### API 키 사용하기
+                            
+                            요청 헤더에 `X-API-Key`를 포함하세요:
+                            
+                            **cURL 예제:**
+                            ```bash
+                            curl -H "X-API-Key: YOUR_API_KEY" \\
+                                 http://localhost:8010/api/stock/SKU001
+                            ```
+                            
+                            **Python 예제:**
+                            ```python
+                            import requests
+                            
+                            headers = {"X-API-Key": "YOUR_API_KEY"}
+                            response = requests.get(
+                                "http://localhost:8010/api/stock/SKU001",
+                                headers=headers
+                            )
+                            ```
+                            """)
+                        
+                    except Exception as e:
+                        st.error(f"API 키 생성 실패: {str(e)}")
+                        st.info("데이터베이스에 playauto_api_keys 테이블이 있는지 확인하세요.")
+                elif generate_btn:
+                    st.error("API 키 이름을 입력하세요.")
+        
+        with api_tabs[1]:
+            st.info("생성된 API 키 목록과 사용 현황")
+            
+            try:
+                # Get all API keys (master sees all)
+                api_keys = ApiKeyQueries.get_all_api_keys()
+                
+                if api_keys:
+                    # Convert to DataFrame for display
+                    df = pd.DataFrame(api_keys)
+                    
+                    # Format the DataFrame
+                    df['created_at'] = pd.to_datetime(df['created_at'])
+                    if 'last_used' in df.columns:
+                        df['last_used'] = pd.to_datetime(df['last_used'])
+                    
+                    # Create display dataframe
+                    display_df = df[['key_id', 'name', 'permissions', 'is_active', 'created_by', 'created_at']].copy()
+                    display_df['is_active'] = display_df['is_active'].apply(lambda x: '✅ 활성' if x else '❌ 비활성')
+                    display_df['created_at'] = display_df['created_at'].dt.strftime('%Y-%m-%d %H:%M')
+                    
+                    # Add last used info if available
+                    if 'last_used' in df.columns:
+                        display_df['last_used'] = df['last_used'].dt.strftime('%Y-%m-%d %H:%M')
+                        display_df['last_used'] = display_df['last_used'].fillna('사용 안함')
+                    
+                    # Rename columns for display
+                    columns_rename = {
+                        'key_id': 'ID',
+                        'name': '키 이름',
+                        'permissions': '권한',
+                        'is_active': '상태',
+                        'created_by': '생성자',
+                        'created_at': '생성일'
+                    }
+                    if 'last_used' in display_df.columns:
+                        columns_rename['last_used'] = '최근 사용'
+                    
+                    display_df.rename(columns=columns_rename, inplace=True)
+                    
+                    # Display the dataframe
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    
+                    # Revoke key functionality
+                    st.markdown("### API 키 비활성화")
+                    key_to_revoke = st.selectbox(
+                        "비활성화할 API 키 선택",
+                        options=df[df['is_active'] == True]['key_id'].tolist() if any(df['is_active']) else [],
+                        format_func=lambda x: f"{df[df['key_id']==x]['name'].values[0]} (ID: {x})"
+                    )
+                    
+                    if st.button("🗑️ 선택한 키 비활성화", type="secondary"):
+                        try:
+                            ApiKeyQueries.deactivate_api_key(key_to_revoke)
+                            st.success("API 키가 비활성화되었습니다.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"키 비활성화 실패: {str(e)}")
+                else:
+                    st.info("생성된 API 키가 없습니다.")
+                    
+            except Exception as e:
+                st.error(f"API 키 목록을 불러오는 중 오류 발생: {str(e)}")
+                st.info("데이터베이스에 playauto_api_keys 테이블이 있는지 확인하세요.")
+
 
 if __name__ == "__main__":
     main()
